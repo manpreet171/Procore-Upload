@@ -9,6 +9,7 @@ import uuid
 import hashlib
 import requests
 import json
+import base64
 
 # Set page configuration
 st.set_page_config(
@@ -22,9 +23,9 @@ st.set_page_config(
 # For Streamlit Cloud, set these in the Streamlit Cloud dashboard
 if 'EMAIL_SENDER' in st.secrets:
     EMAIL_SENDER = st.secrets["EMAIL_SENDER"]
-    # For Mailgun configuration
-    MAILGUN_API_KEY = st.secrets.get("MAILGUN_API_KEY", "")
-    MAILGUN_DOMAIN = st.secrets.get("MAILGUN_DOMAIN", "")
+    EMAIL_SENDER_NAME = st.secrets.get("EMAIL_SENDER_NAME", "Project Upload")
+    # For Brevo configuration
+    BREVO_API_KEY = st.secrets.get("BREVO_API_KEY", "")
     # Get admin password from secrets if available
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
     # Get Slack webhook URL if available
@@ -34,9 +35,9 @@ else:
     try:
         import config
         EMAIL_SENDER = config.EMAIL_SENDER
-        # For Mailgun configuration
-        MAILGUN_API_KEY = getattr(config, "MAILGUN_API_KEY", "")
-        MAILGUN_DOMAIN = getattr(config, "MAILGUN_DOMAIN", "")
+        EMAIL_SENDER_NAME = getattr(config, "EMAIL_SENDER_NAME", "Project Upload")
+        # For Brevo configuration
+        BREVO_API_KEY = getattr(config, "BREVO_API_KEY", "")
         # Get admin password from config if available, otherwise use default
         ADMIN_PASSWORD = getattr(config, "ADMIN_PASSWORD", "admin123")
         # Get Slack webhook URL if available
@@ -70,13 +71,13 @@ def get_email_for_project(project_id):
         return None
 
 def send_email(recipient_email, subject, body, file_paths):
-    """Send email with attachments using Mailgun API"""
-    if not MAILGUN_API_KEY or not MAILGUN_DOMAIN:
-        st.error("❌ Mailgun not configured. Please set up MAILGUN_API_KEY and MAILGUN_DOMAIN in secrets or config.py")
+    """Send email with attachments using Brevo (formerly Sendinblue) API"""
+    if not BREVO_API_KEY:
+        st.error("❌ Brevo API key not configured. Please set up BREVO_API_KEY in secrets or config.py")
         return False
     
     try:
-        st.write(f"📧 Attempting to send email via Mailgun to {recipient_email}")
+        st.write(f"📧 Attempting to send email via Brevo to {recipient_email}")
         
         # Check if files exist and are readable
         valid_files = []
@@ -91,8 +92,8 @@ def send_email(recipient_email, subject, body, file_paths):
             st.error("No valid files to attach!")
             return False
         
-        # Prepare the files for attachment
-        files = []
+        # Prepare the attachments
+        attachments = []
         total_size = 0
         for file_path in valid_files:
             try:
@@ -100,47 +101,72 @@ def send_email(recipient_email, subject, body, file_paths):
                     file_content = file.read()
                     total_size += len(file_content)
                     file_name = os.path.basename(file_path)
-                    files.append(("attachment", (file_name, file_content)))
+                    
+                    # Base64 encode the file content
+                    encoded_content = base64.b64encode(file_content).decode('utf-8')
+                    
+                    attachments.append({
+                        "name": file_name,
+                        "content": encoded_content
+                    })
+                    
                     st.write(f"📎 Prepared file: {file_name} ({len(file_content)/1024:.1f} KB)")
             except Exception as e:
                 st.error(f"❌ Error preparing file {file_path}: {str(e)}")
         
         st.write(f"📊 Total email size: {total_size/1024/1024:.2f} MB")
         
-        # Check if email size is too large (Mailgun limit is 25MB)
-        if total_size > 25 * 1024 * 1024:
-            st.error("❌ Email size exceeds Mailgun's 25MB limit!")
+        # Check if email size is too large (Brevo limit is 10MB)
+        if total_size > 10 * 1024 * 1024:
+            st.error("❌ Email size exceeds Brevo's 10MB limit!")
             return False
         
-        # Prepare the data for the API request
-        data = {
-            "from": f"Project Upload <mailgun@{MAILGUN_DOMAIN}>",
-            "to": recipient_email,
-            "cc": EMAIL_SENDER,  # CC the sender for verification
+        # Prepare the API request payload
+        payload = {
+            "sender": {
+                "name": EMAIL_SENDER_NAME,
+                "email": EMAIL_SENDER
+            },
+            "to": [
+                {
+                    "email": recipient_email
+                }
+            ],
+            "cc": [
+                {
+                    "email": EMAIL_SENDER  # CC the sender for verification
+                }
+            ],
             "subject": subject,
-            "text": body
+            "htmlContent": f"<html><body>{body}</body></html>",
+            "attachment": attachments
         }
         
         # Make the API request
-        st.write(f"🔌 Connecting to Mailgun API...")
+        st.write(f"🔌 Connecting to Brevo API...")
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "api-key": BREVO_API_KEY
+        }
+        
         response = requests.post(
-            f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
-            auth=("api", MAILGUN_API_KEY),
-            files=files,
-            data=data
+            "https://api.brevo.com/v3/smtp/email",
+            headers=headers,
+            json=payload
         )
         
         # Check the response
-        if response.status_code == 200:
-            st.write("✅ Email sent successfully via Mailgun!")
+        if response.status_code in [200, 201, 202, 204]:
+            st.write("✅ Email sent successfully via Brevo!")
             st.info("📝 Note: The email has been sent, but it may take a few minutes to be delivered. A copy has been sent to the sender's email for verification.")
             return True
         else:
-            st.error(f"❌ Mailgun API error: {response.status_code} - {response.text}")
+            st.error(f"❌ Brevo API error: {response.status_code} - {response.text}")
             return False
             
     except Exception as e:
-        st.error(f"❌ Error sending email via Mailgun: {str(e)}")
+        st.error(f"❌ Error sending email via Brevo: {str(e)}")
         return False
 
 def add_project_to_excel(project_id, email):
