@@ -1,3 +1,4 @@
 streamlit==1.46.1  # latest release: June 26, 2025 :contentReference[oaicite:1]{index=1}
 pandas==2.3.1     # latest release: July 7, 2025 :contentReference[oaicite:2]{index=2}
 openpyxl==3.1.5   # latest PyPI release: June 28, 2024 :contentReference[oaicite:3]{index=3}
+requests==2.31.0

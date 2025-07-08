@@ -1,13 +1,14 @@
 import streamlit as st
 import os
 import pandas as pd
-import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import shutil
 import uuid
 import hashlib
+import requests
+import json
 
 # Set page configuration
 st.set_page_config(
@@ -21,21 +22,25 @@ st.set_page_config(
 # For Streamlit Cloud, set these in the Streamlit Cloud dashboard
 if 'EMAIL_SENDER' in st.secrets:
     EMAIL_SENDER = st.secrets["EMAIL_SENDER"]
-    EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
-    EMAIL_SMTP_SERVER = st.secrets["EMAIL_SMTP_SERVER"]
-    EMAIL_SMTP_PORT = st.secrets["EMAIL_SMTP_PORT"]
+    # For Mailgun configuration
+    MAILGUN_API_KEY = st.secrets.get("MAILGUN_API_KEY", "")
+    MAILGUN_DOMAIN = st.secrets.get("MAILGUN_DOMAIN", "")
     # Get admin password from secrets if available
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
+    # Get Slack webhook URL if available
+    SLACK_WEBHOOK_URL = st.secrets.get("SLACK_WEBHOOK_URL", "")
 else:
     # Fallback for local development without secrets
     try:
         import config
         EMAIL_SENDER = config.EMAIL_SENDER
-        EMAIL_PASSWORD = config.EMAIL_PASSWORD
-        EMAIL_SMTP_SERVER = config.EMAIL_SMTP_SERVER
-        EMAIL_SMTP_PORT = config.EMAIL_SMTP_PORT
+        # For Mailgun configuration
+        MAILGUN_API_KEY = getattr(config, "MAILGUN_API_KEY", "")
+        MAILGUN_DOMAIN = getattr(config, "MAILGUN_DOMAIN", "")
         # Get admin password from config if available, otherwise use default
         ADMIN_PASSWORD = getattr(config, "ADMIN_PASSWORD", "admin123")
+        # Get Slack webhook URL if available
+        SLACK_WEBHOOK_URL = getattr(config, "SLACK_WEBHOOK_URL", "")
     except ImportError:
         st.error("No configuration found. Please set up secrets or create a config.py file.")
         st.stop()
@@ -65,34 +70,77 @@ def get_email_for_project(project_id):
         return None
 
 def send_email(recipient_email, subject, body, file_paths):
-    """Send email with attachments"""
+    """Send email with attachments using Mailgun API"""
+    if not MAILGUN_API_KEY or not MAILGUN_DOMAIN:
+        st.error("❌ Mailgun not configured. Please set up MAILGUN_API_KEY and MAILGUN_DOMAIN in secrets or config.py")
+        return False
+    
     try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_SENDER
-        msg['To'] = recipient_email
-        msg['Subject'] = subject
+        st.write(f"📧 Attempting to send email via Mailgun to {recipient_email}")
         
-        msg.attach(MIMEText(body, 'plain'))
-        
-        # Attach files
+        # Check if files exist and are readable
+        valid_files = []
         for file_path in file_paths:
-            with open(file_path, 'rb') as file:
-                file_name = os.path.basename(file_path)
-                attachment = MIMEApplication(file.read(), _subtype=file_path.split('.')[-1])
-                attachment.add_header('Content-Disposition', f'attachment; filename="{file_name}"')
-                msg.attach(attachment)
+            if os.path.exists(file_path) and os.access(file_path, os.R_OK):
+                valid_files.append(file_path)
+                st.write(f"✅ File verified: {file_path}")
+            else:
+                st.error(f"❌ File not accessible: {file_path}")
         
-        # Connect to server and send email
-        server = smtplib.SMTP(EMAIL_SMTP_SERVER, EMAIL_SMTP_PORT)
-        server.starttls()
-        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        text = msg.as_string()
-        server.sendmail(EMAIL_SENDER, recipient_email, text)
-        server.quit()
+        if not valid_files:
+            st.error("No valid files to attach!")
+            return False
         
-        return True
+        # Prepare the files for attachment
+        files = []
+        total_size = 0
+        for file_path in valid_files:
+            try:
+                with open(file_path, "rb") as file:
+                    file_content = file.read()
+                    total_size += len(file_content)
+                    file_name = os.path.basename(file_path)
+                    files.append(("attachment", (file_name, file_content)))
+                    st.write(f"📎 Prepared file: {file_name} ({len(file_content)/1024:.1f} KB)")
+            except Exception as e:
+                st.error(f"❌ Error preparing file {file_path}: {str(e)}")
+        
+        st.write(f"📊 Total email size: {total_size/1024/1024:.2f} MB")
+        
+        # Check if email size is too large (Mailgun limit is 25MB)
+        if total_size > 25 * 1024 * 1024:
+            st.error("❌ Email size exceeds Mailgun's 25MB limit!")
+            return False
+        
+        # Prepare the data for the API request
+        data = {
+            "from": f"Project Upload <mailgun@{MAILGUN_DOMAIN}>",
+            "to": recipient_email,
+            "cc": EMAIL_SENDER,  # CC the sender for verification
+            "subject": subject,
+            "text": body
+        }
+        
+        # Make the API request
+        st.write(f"🔌 Connecting to Mailgun API...")
+        response = requests.post(
+            f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
+            auth=("api", MAILGUN_API_KEY),
+            files=files,
+            data=data
+        )
+        
+        # Check the response
+        if response.status_code == 200:
+            st.write("✅ Email sent successfully via Mailgun!")
+            st.info("📝 Note: The email has been sent, but it may take a few minutes to be delivered. A copy has been sent to the sender's email for verification.")
+            return True
+        else:
+            st.error(f"❌ Mailgun API error: {response.status_code} - {response.text}")
+            return False
+            
     except Exception as e:
-        st.error(f"Error sending email: {e}")
+        st.error(f"❌ Error sending email via Mailgun: {str(e)}")
         return False
 
 def add_project_to_excel(project_id, email):
