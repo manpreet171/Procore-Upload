@@ -28,10 +28,6 @@ credentials.json.json
 token.json
 *.env
 
-# Project specific
-uploads/
-*.xlsx
-
 # OS specific
 .DS_Store
 Thumbs.db
