@@ -97,10 +97,6 @@ def send_email(recipient_email, subject, body, file_paths):
         msg['To'] = recipient_email
         msg['Subject'] = subject
         
-        # Add CC to sender for verification
-        msg['Cc'] = EMAIL_SENDER
-        all_recipients = [recipient_email, EMAIL_SENDER]
-        
         # Add HTML body
         msg.attach(MIMEText(f"<html><body>{body}</body></html>", 'html'))
         
@@ -134,7 +130,7 @@ def send_email(recipient_email, subject, body, file_paths):
             text = msg.as_string()
             
             # Send the email
-            send_result = server.sendmail(EMAIL_SENDER, all_recipients, text)
+            send_result = server.sendmail(EMAIL_SENDER, [recipient_email], text)
             
             # Check if there were any failed recipients
             if send_result:
@@ -243,13 +239,10 @@ def upload_images_tab():
                     except Exception as e:
                         st.warning(f"Could not clean up temporary files: {str(e)}")
                     
-                    # Auto-refresh the app after 3 seconds
-                    st.success("Page will refresh in 3 seconds...")
+                    # Use JavaScript for immediate refresh
                     st.markdown("""
                     <script>
-                        setTimeout(function() {
-                            window.location.reload();
-                        }, 3000);
+                        window.location.reload();
                     </script>
                     """, unsafe_allow_html=True)
                 else:
