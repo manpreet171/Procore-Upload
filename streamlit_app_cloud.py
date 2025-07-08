@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import pandas as pd
+import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -9,7 +10,6 @@ import uuid
 import hashlib
 import requests
 import json
-import base64
 
 # Set page configuration
 st.set_page_config(
@@ -24,8 +24,11 @@ st.set_page_config(
 if 'EMAIL_SENDER' in st.secrets:
     EMAIL_SENDER = st.secrets["EMAIL_SENDER"]
     EMAIL_SENDER_NAME = st.secrets.get("EMAIL_SENDER_NAME", "Project Upload")
-    # For Brevo configuration
-    BREVO_API_KEY = st.secrets.get("BREVO_API_KEY", "")
+    # For Brevo SMTP configuration
+    BREVO_SMTP_SERVER = st.secrets.get("BREVO_SMTP_SERVER", "smtp-relay.brevo.com")
+    BREVO_SMTP_PORT = st.secrets.get("BREVO_SMTP_PORT", 587)
+    BREVO_SMTP_LOGIN = st.secrets.get("BREVO_SMTP_LOGIN", "919624001@smtp-brevo.com")
+    BREVO_SMTP_PASSWORD = st.secrets.get("BREVO_SMTP_PASSWORD", "JVgNcDARtEBXyKYG")
     # Get admin password from secrets if available
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
     # Get Slack webhook URL if available
@@ -36,8 +39,11 @@ else:
         import config
         EMAIL_SENDER = config.EMAIL_SENDER
         EMAIL_SENDER_NAME = getattr(config, "EMAIL_SENDER_NAME", "Project Upload")
-        # For Brevo configuration
-        BREVO_API_KEY = getattr(config, "BREVO_API_KEY", "")
+        # For Brevo SMTP configuration
+        BREVO_SMTP_SERVER = getattr(config, "BREVO_SMTP_SERVER", "smtp-relay.brevo.com")
+        BREVO_SMTP_PORT = getattr(config, "BREVO_SMTP_PORT", 587)
+        BREVO_SMTP_LOGIN = getattr(config, "BREVO_SMTP_LOGIN", "919624001@smtp-brevo.com")
+        BREVO_SMTP_PASSWORD = getattr(config, "BREVO_SMTP_PASSWORD", "JVgNcDARtEBXyKYG")
         # Get admin password from config if available, otherwise use default
         ADMIN_PASSWORD = getattr(config, "ADMIN_PASSWORD", "admin123")
         # Get Slack webhook URL if available
@@ -71,13 +77,9 @@ def get_email_for_project(project_id):
         return None
 
 def send_email(recipient_email, subject, body, file_paths):
-    """Send email with attachments using Brevo (formerly Sendinblue) API"""
-    if not BREVO_API_KEY:
-        st.error("❌ Brevo API key not configured. Please set up BREVO_API_KEY in secrets or config.py")
-        return False
-    
+    """Send email with attachments using Brevo SMTP"""
     try:
-        st.write(f"📧 Attempting to send email via Brevo to {recipient_email}")
+        st.write(f"📧 Attempting to send email via Brevo SMTP to {recipient_email}")
         
         # Check if files exist and are readable
         valid_files = []
@@ -92,27 +94,33 @@ def send_email(recipient_email, subject, body, file_paths):
             st.error("No valid files to attach!")
             return False
         
-        # Prepare the attachments
-        attachments = []
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = f"{EMAIL_SENDER_NAME} <{EMAIL_SENDER}>"
+        msg['To'] = recipient_email
+        msg['Subject'] = subject
+        
+        # Add CC to sender for verification
+        msg['Cc'] = EMAIL_SENDER
+        all_recipients = [recipient_email, EMAIL_SENDER]
+        
+        # Add HTML body
+        msg.attach(MIMEText(f"<html><body>{body}</body></html>", 'html'))
+        
+        # Attach files
         total_size = 0
         for file_path in valid_files:
             try:
-                with open(file_path, "rb") as file:
+                with open(file_path, 'rb') as file:
                     file_content = file.read()
                     total_size += len(file_content)
                     file_name = os.path.basename(file_path)
-                    
-                    # Base64 encode the file content
-                    encoded_content = base64.b64encode(file_content).decode('utf-8')
-                    
-                    attachments.append({
-                        "name": file_name,
-                        "content": encoded_content
-                    })
-                    
-                    st.write(f"📎 Prepared file: {file_name} ({len(file_content)/1024:.1f} KB)")
+                    attachment = MIMEApplication(file_content, _subtype=file_path.split('.')[-1])
+                    attachment.add_header('Content-Disposition', f'attachment; filename="{file_name}"')
+                    msg.attach(attachment)
+                    st.write(f"📎 Attached file: {file_name} ({len(file_content)/1024:.1f} KB)")
             except Exception as e:
-                st.error(f"❌ Error preparing file {file_path}: {str(e)}")
+                st.error(f"❌ Error attaching file {file_path}: {str(e)}")
         
         st.write(f"📊 Total email size: {total_size/1024/1024:.2f} MB")
         
@@ -121,52 +129,50 @@ def send_email(recipient_email, subject, body, file_paths):
             st.error("❌ Email size exceeds Brevo's 10MB limit!")
             return False
         
-        # Prepare the API request payload
-        payload = {
-            "sender": {
-                "name": EMAIL_SENDER_NAME,
-                "email": EMAIL_SENDER
-            },
-            "to": [
-                {
-                    "email": recipient_email
-                }
-            ],
-            "cc": [
-                {
-                    "email": EMAIL_SENDER  # CC the sender for verification
-                }
-            ],
-            "subject": subject,
-            "htmlContent": f"<html><body>{body}</body></html>",
-            "attachment": attachments
-        }
+        # Connect to server and send email
+        st.write(f"🔌 Connecting to SMTP server: {BREVO_SMTP_SERVER}:{BREVO_SMTP_PORT}")
         
-        # Make the API request
-        st.write(f"🔌 Connecting to Brevo API...")
-        headers = {
-            "accept": "application/json",
-            "content-type": "application/json",
-            "api-key": BREVO_API_KEY
-        }
-        
-        response = requests.post(
-            "https://api.brevo.com/v3/smtp/email",
-            headers=headers,
-            json=payload
-        )
-        
-        # Check the response
-        if response.status_code in [200, 201, 202, 204]:
-            st.write("✅ Email sent successfully via Brevo!")
+        try:
+            server = smtplib.SMTP(BREVO_SMTP_SERVER, BREVO_SMTP_PORT)
+            server.ehlo()
+            st.write("✅ SMTP connection established")
+            
+            server.starttls()
+            st.write("✅ TLS encryption enabled")
+            
+            st.write(f"🔑 Logging in as {BREVO_SMTP_LOGIN}")
+            server.login(BREVO_SMTP_LOGIN, BREVO_SMTP_PASSWORD)
+            st.write("✅ Login successful")
+            
+            text = msg.as_string()
+            st.write(f"📧 Sending email to {recipient_email} and CC to {EMAIL_SENDER}...")
+            
+            # Send the email
+            send_result = server.sendmail(EMAIL_SENDER, all_recipients, text)
+            
+            # Check if there were any failed recipients
+            if send_result:
+                st.error(f"❌ Failed to deliver to some recipients: {send_result}")
+                server.quit()
+                return False
+                
+            server.quit()
+            st.write("✅ Email sent successfully and SMTP connection closed!")
+            
+            # Add a note about email delivery
             st.info("📝 Note: The email has been sent, but it may take a few minutes to be delivered. A copy has been sent to the sender's email for verification.")
+            
             return True
-        else:
-            st.error(f"❌ Brevo API error: {response.status_code} - {response.text}")
+            
+        except smtplib.SMTPAuthenticationError:
+            st.error("❌ Authentication failed! Please check your SMTP login and password.")
+            return False
+        except smtplib.SMTPException as e:
+            st.error(f"❌ SMTP error: {str(e)}")
             return False
             
     except Exception as e:
-        st.error(f"❌ Error sending email via Brevo: {str(e)}")
+        st.error(f"❌ Error sending email: {str(e)}")
         return False
 
 def add_project_to_excel(project_id, email):
