@@ -27,6 +27,7 @@ var/
 credentials.json.json
 token.json
 *.env
+config.py
 
 # OS specific
 .DS_Store
