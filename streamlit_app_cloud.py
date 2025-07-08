@@ -79,14 +79,11 @@ def get_email_for_project(project_id):
 def send_email(recipient_email, subject, body, file_paths):
     """Send email with attachments using Brevo SMTP"""
     try:
-        st.write(f"📧 Attempting to send email via Brevo SMTP to {recipient_email}")
-        
         # Check if files exist and are readable
         valid_files = []
         for file_path in file_paths:
             if os.path.exists(file_path) and os.access(file_path, os.R_OK):
                 valid_files.append(file_path)
-                st.write(f"✅ File verified: {file_path}")
             else:
                 st.error(f"❌ File not accessible: {file_path}")
         
@@ -118,11 +115,9 @@ def send_email(recipient_email, subject, body, file_paths):
                     attachment = MIMEApplication(file_content, _subtype=file_path.split('.')[-1])
                     attachment.add_header('Content-Disposition', f'attachment; filename="{file_name}"')
                     msg.attach(attachment)
-                    st.write(f"📎 Attached file: {file_name} ({len(file_content)/1024:.1f} KB)")
             except Exception as e:
                 st.error(f"❌ Error attaching file {file_path}: {str(e)}")
-        
-        st.write(f"📊 Total email size: {total_size/1024/1024:.2f} MB")
+                return False
         
         # Check if email size is too large (Brevo limit is 10MB)
         if total_size > 10 * 1024 * 1024:
@@ -130,38 +125,24 @@ def send_email(recipient_email, subject, body, file_paths):
             return False
         
         # Connect to server and send email
-        st.write(f"🔌 Connecting to SMTP server: {BREVO_SMTP_SERVER}:{BREVO_SMTP_PORT}")
-        
         try:
             server = smtplib.SMTP(BREVO_SMTP_SERVER, BREVO_SMTP_PORT)
             server.ehlo()
-            st.write("✅ SMTP connection established")
-            
             server.starttls()
-            st.write("✅ TLS encryption enabled")
-            
-            st.write(f"🔑 Logging in as {BREVO_SMTP_LOGIN}")
             server.login(BREVO_SMTP_LOGIN, BREVO_SMTP_PASSWORD)
-            st.write("✅ Login successful")
             
             text = msg.as_string()
-            st.write(f"📧 Sending email to {recipient_email} and CC to {EMAIL_SENDER}...")
             
             # Send the email
             send_result = server.sendmail(EMAIL_SENDER, all_recipients, text)
             
             # Check if there were any failed recipients
             if send_result:
-                st.error(f"❌ Failed to deliver to some recipients: {send_result}")
+                st.error("❌ Failed to deliver to some recipients")
                 server.quit()
                 return False
                 
             server.quit()
-            st.write("✅ Email sent successfully and SMTP connection closed!")
-            
-            # Add a note about email delivery
-            st.info("📝 Note: The email has been sent, but it may take a few minutes to be delivered. A copy has been sent to the sender's email for verification.")
-            
             return True
             
         except smtplib.SMTPAuthenticationError:
@@ -209,59 +190,74 @@ def upload_images_tab():
     st.header("Upload Images")
     
     # Project ID input
-    project_id = st.text_input("Project ID", placeholder="Enter the Project ID", key="upload_project_id")
+    project_id = st.text_input("Enter Project ID")
     
-    # File upload
-    uploaded_files = st.file_uploader(
-        "Upload Images", 
-        accept_multiple_files=True,
-        type=list(ALLOWED_EXTENSIONS)
-    )
+    # File uploader
+    uploaded_files = st.file_uploader("Upload Images", type=["png", "jpg", "jpeg", "gif"], accept_multiple_files=True)
     
-    if uploaded_files and project_id:
-        if st.button("Send Images"):
-            with st.spinner("Processing images..."):
-                # Create a temporary directory for this upload
-                temp_dir = os.path.join(UPLOAD_FOLDER, str(uuid.uuid4()))
-                os.makedirs(temp_dir, exist_ok=True)
+    if st.button("Upload and Send"):
+        if not project_id:
+            st.error("Please enter a Project ID")
+        elif not uploaded_files:
+            st.error("Please upload at least one image")
+        else:
+            # Get email for project
+            recipient_email = get_email_for_project(project_id)
+            
+            if not recipient_email:
+                st.error(f"No email found for Project ID: {project_id}")
+            else:
+                # Create a unique directory for this upload
+                upload_dir = os.path.join(UPLOAD_FOLDER, str(uuid.uuid4()))
+                os.makedirs(upload_dir, exist_ok=True)
                 
-                # Save uploaded files to temp directory
+                # Save uploaded files
                 saved_files = []
                 for uploaded_file in uploaded_files:
-                    file_path = os.path.join(temp_dir, uploaded_file.name)
+                    file_path = os.path.join(upload_dir, uploaded_file.name)
                     with open(file_path, "wb") as f:
                         f.write(uploaded_file.getbuffer())
                     saved_files.append(file_path)
                 
-                # Get email for project
-                email = get_email_for_project(project_id)
-                
-                if not email:
-                    st.error(f"No email found for Project ID: {project_id}")
-                    # Clean up temp files
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                    return
-                
-                # Send email with attachments
+                # Send email
                 subject = f"Images for Project ID: {project_id}"
                 body = f"Please find attached images for Project ID: {project_id}"
                 
-                email_sent = send_email(email, subject, body, saved_files)
-                
-                if email_sent:
-                    st.success(f"Images sent to {email}")
+                if send_email(recipient_email, subject, body, saved_files):
+                    # Send Slack notification if webhook URL is configured
+                    if SLACK_WEBHOOK_URL:
+                        try:
+                            slack_message = {
+                                "text": f"✅ New images uploaded for Project ID: {project_id}"
+                            }
+                            requests.post(SLACK_WEBHOOK_URL, json=slack_message)
+                        except Exception as e:
+                            st.warning(f"Could not send Slack notification: {str(e)}")
+                    
+                    # Show success message without revealing email
+                    st.success("✅ Images sent successfully!")
+                    
+                    # Clean up the temporary files
+                    try:
+                        shutil.rmtree(upload_dir)
+                    except Exception as e:
+                        st.warning(f"Could not clean up temporary files: {str(e)}")
+                    
+                    # Auto-refresh the app after 3 seconds
+                    st.success("Page will refresh in 3 seconds...")
+                    st.markdown("""
+                    <script>
+                        setTimeout(function() {
+                            window.location.reload();
+                        }, 3000);
+                    </script>
+                    """, unsafe_allow_html=True)
                 else:
-                    st.error("Failed to send email")
-                
-                # Clean up temp files
-                shutil.rmtree(temp_dir, ignore_errors=True)
-    
-    # Display information
-    st.markdown("---")
-    st.markdown("### Instructions")
-    st.markdown("1. Enter the Project ID")
-    st.markdown("2. Upload one or more images (JPG, PNG, GIF)")
-    st.markdown("3. Click 'Send Images' to email them to the associated address")
+                    # Clean up the temporary files on failure
+                    try:
+                        shutil.rmtree(upload_dir)
+                    except:
+                        pass
 
 def manage_projects_tab():
     st.header("Manage Projects")
