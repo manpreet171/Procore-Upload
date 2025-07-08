@@ -10,6 +10,7 @@ import uuid
 import hashlib
 import requests
 import json
+import time
 
 # Set page configuration
 st.set_page_config(
@@ -240,6 +241,7 @@ def upload_images_tab():
                         st.warning(f"Could not clean up temporary files: {str(e)}")
                     
                     # More reliable way to refresh the page in Streamlit
+                    time.sleep(1)  # Brief pause to ensure message is visible
                     st.experimental_rerun()
                 else:
                     # Clean up the temporary files on failure
