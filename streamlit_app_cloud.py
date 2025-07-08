@@ -239,12 +239,8 @@ def upload_images_tab():
                     except Exception as e:
                         st.warning(f"Could not clean up temporary files: {str(e)}")
                     
-                    # Use JavaScript for immediate refresh
-                    st.markdown("""
-                    <script>
-                        window.location.reload();
-                    </script>
-                    """, unsafe_allow_html=True)
+                    # More reliable way to refresh the page in Streamlit
+                    st.experimental_rerun()
                 else:
                     # Clean up the temporary files on failure
                     try:
