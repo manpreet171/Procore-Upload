@@ -7,6 +7,7 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import shutil
 import uuid
+import hashlib
 
 # Set page configuration
 st.set_page_config(
@@ -23,6 +24,8 @@ if 'EMAIL_SENDER' in st.secrets:
     EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
     EMAIL_SMTP_SERVER = st.secrets["EMAIL_SMTP_SERVER"]
     EMAIL_SMTP_PORT = st.secrets["EMAIL_SMTP_PORT"]
+    # Get admin password from secrets if available
+    ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
 else:
     # Fallback for local development without secrets
     try:
@@ -31,6 +34,8 @@ else:
         EMAIL_PASSWORD = config.EMAIL_PASSWORD
         EMAIL_SMTP_SERVER = config.EMAIL_SMTP_SERVER
         EMAIL_SMTP_PORT = config.EMAIL_SMTP_PORT
+        # Get admin password from config if available, otherwise use default
+        ADMIN_PASSWORD = getattr(config, "ADMIN_PASSWORD", "admin123")
     except ImportError:
         st.error("No configuration found. Please set up secrets or create a config.py file.")
         st.stop()
@@ -115,6 +120,11 @@ def add_project_to_excel(project_id, email):
     except Exception as e:
         return False, f"Error adding project: {e}"
 
+def verify_password(password):
+    """Verify if the provided password matches the admin password"""
+    # In a production environment, use a more secure password hashing method
+    return password == ADMIN_PASSWORD
+
 def upload_images_tab():
     st.header("Upload Images")
     
@@ -175,6 +185,21 @@ def upload_images_tab():
 
 def manage_projects_tab():
     st.header("Manage Projects")
+    
+    # Password protection
+    password_placeholder = st.empty()
+    password_input = password_placeholder.text_input("Enter Admin Password", type="password")
+    
+    if not password_input:
+        st.info("Please enter the admin password to access project management.")
+        return
+    
+    if not verify_password(password_input):
+        st.error("Incorrect password. Access denied.")
+        return
+    
+    # If password is correct, remove the password field and show the content
+    password_placeholder.empty()
     
     # Add new project section
     st.subheader("Add New Project")
