@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Image Upload</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .drop-zone {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        .drop-zone:hover {
+            border-color: #0d6efd;
+            background-color: #f8f9fa;
+        }
+        .drop-zone.dragover {
+            border-color: #0d6efd;
+            background-color: #e9ecef;
+        }
+        .preview-container {
+            display: flex;
+            flex-wrap: wrap;
+            margin-top: 20px;
+            gap: 10px;
+        }
+        .preview-item {
+            position: relative;
+            width: 150px;
+            height: 150px;
+            overflow: hidden;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+        .preview-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .preview-item .remove-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 50%;
+            width: 25px;
+            height: 25px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-weight: bold;
+            color: #dc3545;
+        }
+        .progress-container {
+            margin-top: 20px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h4 class="mb-0">Project Image Upload</h4>
+                    </div>
+                    <div class="card-body">
+                        <form id="uploadForm">
+                            <div class="mb-3">
+                                <label for="projectId" class="form-label">Project ID</label>
+                                <input type="text" class="form-control" id="projectId" name="projectId" required>
+                                <div class="form-text">Enter the Project ID to associate with these images</div>
+                            </div>
+                            
+                            <div class="mb-4">
+                                <label class="form-label">Upload Images</label>
+                                <div id="dropZone" class="drop-zone">
+                                    <div id="dropText">
+                                        <i class="bi bi-cloud-upload"></i>
+                                        <p>Drag & drop images here or click to browse</p>
+                                        <p class="text-muted small">Supported formats: JPG, PNG, GIF</p>
+                                    </div>
+                                    <input type="file" id="fileInput" name="files" multiple accept="image/*" class="d-none">
+                                </div>
+                                
+                                <div id="previewContainer" class="preview-container"></div>
+                                
+                                <div id="progressContainer" class="progress-container">
+                                    <div class="progress">
+                                        <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                    </div>
+                                    <p id="progressText" class="text-center mt-2">Uploading...</p>
+                                </div>
+                            </div>
+                            
+                            <div class="d-grid">
+                                <button type="submit" id="submitBtn" class="btn btn-primary">Upload Images</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                
+                <div id="resultContainer" class="mt-4 d-none">
+                    <div class="alert" role="alert" id="resultAlert"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('fileInput');
+            const previewContainer = document.getElementById('previewContainer');
+            const uploadForm = document.getElementById('uploadForm');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const resultContainer = document.getElementById('resultContainer');
+            const resultAlert = document.getElementById('resultAlert');
+            const submitBtn = document.getElementById('submitBtn');
+            
+            // Store selected files
+            let selectedFiles = [];
+            
+            // Click on drop zone to trigger file input
+            dropZone.addEventListener('click', function() {
+                fileInput.click();
+            });
+            
+            // Prevent default drag behaviors
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            // Highlight drop zone when dragging over it
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() {
+                dropZone.classList.add('dragover');
+            }
+            
+            function unhighlight() {
+                dropZone.classList.remove('dragover');
+            }
+            
+            // Handle dropped files
+            dropZone.addEventListener('drop', handleDrop, false);
+            
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                handleFiles(files);
+            }
+            
+            // Handle selected files from file input
+            fileInput.addEventListener('change', function() {
+                handleFiles(this.files);
+            });
+            
+            function handleFiles(files) {
+                if (files.length === 0) return;
+                
+                // Filter for image files only
+                const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+                
+                if (imageFiles.length === 0) {
+                    showResult('Please select image files only (JPG, PNG, GIF).', 'danger');
+                    return;
+                }
+                
+                // Add to selected files array
+                selectedFiles = [...selectedFiles, ...imageFiles];
+                
+                // Preview images
+                imageFiles.forEach(previewFile);
+            }
+            
+            function previewFile(file) {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onloadend = function() {
+                    const previewItem = document.createElement('div');
+                    previewItem.className = 'preview-item';
+                    previewItem.innerHTML = `
+                        <img src="${reader.result}" alt="${file.name}">
+                        <div class="remove-btn" data-name="${file.name}">×</div>
+                    `;
+                    previewContainer.appendChild(previewItem);
+                    
+                    // Add remove functionality
+                    previewItem.querySelector('.remove-btn').addEventListener('click', function() {
+                        const fileName = this.getAttribute('data-name');
+                        selectedFiles = selectedFiles.filter(f => f.name !== fileName);
+                        previewItem.remove();
+                    });
+                }
+            }
+            
+            // Handle form submission
+            uploadForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const projectId = document.getElementById('projectId').value.trim();
+                
+                if (!projectId) {
+                    showResult('Please enter a Project ID.', 'danger');
+                    return;
+                }
+                
+                if (selectedFiles.length === 0) {
+                    showResult('Please select at least one image to upload.', 'danger');
+                    return;
+                }
+                
+                uploadFiles(projectId);
+            });
+            
+            function uploadFiles(projectId) {
+                const formData = new FormData();
+                formData.append('projectId', projectId);
+                
+                selectedFiles.forEach(file => {
+                    formData.append('files', file);
+                });
+                
+                // Show progress
+                progressContainer.style.display = 'block';
+                submitBtn.disabled = true;
+                
+                // Send AJAX request
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/upload', true);
+                
+                xhr.upload.addEventListener('progress', function(e) {
+                    if (e.lengthComputable) {
+                        const percentComplete = (e.loaded / e.total) * 100;
+                        progressBar.style.width = percentComplete + '%';
+                        progressText.textContent = `Uploading... ${Math.round(percentComplete)}%`;
+                    }
+                });
+                
+                xhr.onload = function() {
+                    progressContainer.style.display = 'none';
+                    submitBtn.disabled = false;
+                    
+                    if (xhr.status === 200) {
+                        const response = JSON.parse(xhr.responseText);
+                        showResult(response.message, 'success');
+                        // Clear form
+                        selectedFiles = [];
+                        previewContainer.innerHTML = '';
+                        document.getElementById('projectId').value = '';
+                    } else {
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            showResult(response.error, 'danger');
+                        } catch (e) {
+                            showResult('An error occurred during upload.', 'danger');
+                        }
+                    }
+                };
+                
+                xhr.onerror = function() {
+                    progressContainer.style.display = 'none';
+                    submitBtn.disabled = false;
+                    showResult('Network error occurred.', 'danger');
+                };
+                
+                xhr.send(formData);
+            }
+            
+            function showResult(message, type) {
+                resultContainer.classList.remove('d-none');
+                resultAlert.className = `alert alert-${type}`;
+                resultAlert.textContent = message;
+                
+                // Scroll to result
+                resultContainer.scrollIntoView({ behavior: 'smooth' });
+                
+                // Hide after 5 seconds if success
+                if (type === 'success') {
+                    setTimeout(() => {
+                        resultContainer.classList.add('d-none');
+                    }, 5000);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
