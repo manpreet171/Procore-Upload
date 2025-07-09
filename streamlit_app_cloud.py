@@ -11,7 +11,6 @@ import hashlib
 import requests
 import json
 import time
-import base64
 
 # Set page configuration
 st.set_page_config(
@@ -192,10 +191,8 @@ def upload_images_tab():
     if st.session_state.form_submitted:
         # Reset the flag
         st.session_state.form_submitted = False
-        # Force a hard browser refresh using JavaScript
-        js = "window.location.reload();"
-        html = f"<script>{js}</script>"
-        st.components.v1.html(html)
+        # Force a rerun to clear all widgets
+        st.rerun()
     
     st.header("Upload Images")
     
