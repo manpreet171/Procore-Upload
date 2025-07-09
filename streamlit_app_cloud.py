@@ -11,6 +11,8 @@ import hashlib
 import requests
 import json
 import time
+import sqlite3
+import io
 
 # Set page configuration
 st.set_page_config(
@@ -34,6 +36,7 @@ if 'EMAIL_SENDER' in st.secrets:
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
     # Get Slack webhook URL if available
     SLACK_WEBHOOK_URL = st.secrets.get("SLACK_WEBHOOK_URL", "")
+    DB_FILE = st.secrets.get("DB_FILE", "projects.db")
 else:
     # Fallback for local development without secrets
     try:
@@ -49,6 +52,7 @@ else:
         ADMIN_PASSWORD = getattr(config, "ADMIN_PASSWORD", "admin123")
         # Get Slack webhook URL if available
         SLACK_WEBHOOK_URL = getattr(config, "SLACK_WEBHOOK_URL", "")
+        DB_FILE = getattr(config, "DB_FILE", "projects.db")
     except ImportError:
         st.error("No configuration found. Please set up secrets or create a config.py file.")
         st.stop()
@@ -63,18 +67,16 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 def get_email_for_project(project_id):
-    """Get email address for a project ID from Excel file"""
+    """Get email address for a project ID from SQLite"""
     try:
-        df = pd.read_excel(EXCEL_FILE)
-        
-        # Try to find the project ID as a string first
-        matching_row = df[df['Project ID'].astype(str) == str(project_id)]
-        
-        if not matching_row.empty:
-            return matching_row.iloc[0]['Email ID link']
+        conn = sqlite3.connect(DB_FILE)
+        df = pd.read_sql_query("SELECT email FROM projects WHERE project_id = ?", conn, params=(project_id,))
+        conn.close()
+        if not df.empty:
+            return df.iloc[0]['email']
         return None
     except Exception as e:
-        st.error(f"Error reading Excel file: {e}")
+        st.error(f"Error reading SQLite database: {e}")
         return None
 
 def send_email(recipient_email, subject, body, file_paths):
@@ -153,80 +155,67 @@ def send_email(recipient_email, subject, body, file_paths):
         st.error(f"❌ Error sending email: {str(e)}")
         return False
 
-def add_project_to_excel(project_id, email):
-    """Add a new project ID and email to the Excel file"""
+def add_project_to_sqlite(project_id, email):
+    """Add a new project ID and email to the SQLite database"""
     try:
-        # Create the Excel file if it doesn't exist
-        if not os.path.exists(EXCEL_FILE):
-            df = pd.DataFrame(columns=['Project ID', 'Email ID link'])
-            df.to_excel(EXCEL_FILE, index=False)
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
         
-        # Read existing data
-        df = pd.read_excel(EXCEL_FILE)
+        # Create table if it doesn't exist
+        c.execute('''CREATE TABLE IF NOT EXISTS projects
+                     (project_id text, email text)''')
         
         # Check if project ID already exists
-        if str(project_id) in df['Project ID'].astype(str).values:
+        c.execute("SELECT * FROM projects WHERE project_id = ?", (project_id,))
+        if c.fetchone():
             return False, "Project ID already exists"
         
         # Add new row
-        new_row = pd.DataFrame({'Project ID': [project_id], 'Email ID link': [email]})
-        df = pd.concat([df, new_row], ignore_index=True)
-        
-        # Save back to Excel
-        df.to_excel(EXCEL_FILE, index=False)
+        c.execute("INSERT INTO projects VALUES (?, ?)", (project_id, email))
+        conn.commit()
+        conn.close()
         return True, "Project added successfully"
     except Exception as e:
         return False, f"Error adding project: {e}"
 
-def edit_project_in_excel(old_project_id, new_project_id, new_email):
-    """Edit an existing project ID and email in the Excel file"""
+def edit_project_in_sqlite(old_project_id, new_project_id, new_email):
+    """Edit an existing project ID and email in the SQLite database"""
     try:
-        # Check if Excel file exists
-        if not os.path.exists(EXCEL_FILE):
-            return False, "Excel file does not exist"
-        
-        # Read existing data
-        df = pd.read_excel(EXCEL_FILE)
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
         
         # Find the row with the old project ID
-        mask = df['Project ID'].astype(str) == str(old_project_id)
-        if not mask.any():
+        c.execute("SELECT * FROM projects WHERE project_id = ?", (old_project_id,))
+        if not c.fetchone():
             return False, f"Project ID {old_project_id} not found"
         
         # If new project ID is different from old one, check if it already exists
-        if str(old_project_id) != str(new_project_id) and str(new_project_id) in df['Project ID'].astype(str).values:
+        if old_project_id != new_project_id and c.execute("SELECT * FROM projects WHERE project_id = ?", (new_project_id,)).fetchone():
             return False, f"Project ID {new_project_id} already exists"
         
         # Update the row
-        df.loc[mask, 'Project ID'] = new_project_id
-        df.loc[mask, 'Email ID link'] = new_email
-        
-        # Save back to Excel
-        df.to_excel(EXCEL_FILE, index=False)
+        c.execute("UPDATE projects SET project_id = ?, email = ? WHERE project_id = ?", (new_project_id, new_email, old_project_id))
+        conn.commit()
+        conn.close()
         return True, "Project updated successfully"
     except Exception as e:
         return False, f"Error updating project: {e}"
 
-def delete_project_from_excel(project_id):
-    """Delete a project from the Excel file"""
+def delete_project_from_sqlite(project_id):
+    """Delete a project from the SQLite database"""
     try:
-        # Check if Excel file exists
-        if not os.path.exists(EXCEL_FILE):
-            return False, "Excel file does not exist"
-        
-        # Read existing data
-        df = pd.read_excel(EXCEL_FILE)
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
         
         # Find the row with the project ID
-        mask = df['Project ID'].astype(str) == str(project_id)
-        if not mask.any():
+        c.execute("SELECT * FROM projects WHERE project_id = ?", (project_id,))
+        if not c.fetchone():
             return False, f"Project ID {project_id} not found"
         
         # Remove the row
-        df = df[~mask]
-        
-        # Save back to Excel
-        df.to_excel(EXCEL_FILE, index=False)
+        c.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
+        conn.commit()
+        conn.close()
         return True, "Project deleted successfully"
     except Exception as e:
         return False, f"Error deleting project: {e}"
@@ -318,6 +307,82 @@ def upload_images_tab():
                     except:
                         pass
 
+def bulk_import_projects(uploaded_file):
+    """Import multiple projects from an uploaded Excel or CSV file"""
+    try:
+        # Determine file type and read accordingly
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        elif uploaded_file.name.endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(uploaded_file)
+        else:
+            return False, "Unsupported file format. Please upload a CSV or Excel file."
+        
+        # Check if the dataframe has the required columns
+        required_columns = ['Project ID', 'Email ID link']
+        if not all(col in df.columns for col in required_columns):
+            return False, f"File must contain these columns: {', '.join(required_columns)}"
+        
+        # Connect to database
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        
+        # Create table if it doesn't exist
+        c.execute('''CREATE TABLE IF NOT EXISTS projects
+                     (project_id text UNIQUE, email text)''')
+        
+        # Track import stats
+        added = 0
+        skipped = 0
+        errors = []
+        
+        # Process each row
+        for _, row in df.iterrows():
+            try:
+                project_id = str(row['Project ID'])
+                email = row['Email ID link']
+                
+                # Skip empty rows
+                if pd.isna(project_id) or pd.isna(email) or not project_id or not email:
+                    skipped += 1
+                    continue
+                
+                # Check if project ID already exists
+                c.execute("SELECT 1 FROM projects WHERE project_id = ?", (project_id,))
+                if c.fetchone():
+                    skipped += 1
+                    continue
+                
+                # Add new project
+                c.execute("INSERT INTO projects VALUES (?, ?)", (project_id, email))
+                added += 1
+                
+            except Exception as e:
+                errors.append(f"Row {_ + 2}: {str(e)}")
+        
+        # Log the bulk import
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        c.execute('''CREATE TABLE IF NOT EXISTS change_log
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, action TEXT, project_id TEXT, details TEXT)''')
+        c.execute("INSERT INTO change_log (timestamp, action, project_id, details) VALUES (?, ?, ?, ?)",
+                 (timestamp, "bulk_import", "multiple", f"Added {added}, skipped {skipped} projects"))
+        
+        # Commit changes and close connection
+        conn.commit()
+        conn.close()
+        
+        # Prepare result message
+        result_message = f"Successfully added {added} projects, skipped {skipped} duplicates."
+        if errors:
+            result_message += f"\n\nErrors ({len(errors)}):\n" + "\n".join(errors[:10])
+            if len(errors) > 10:
+                result_message += f"\n...and {len(errors) - 10} more errors."
+        
+        return True, result_message
+        
+    except Exception as e:
+        return False, f"Error importing projects: {str(e)}"
+
 def manage_projects_tab():
     st.header("Manage Projects")
     
@@ -342,96 +407,224 @@ def manage_projects_tab():
         st.session_state.edit_project_id = ""
         st.session_state.edit_email = ""
     
-    # Add new project section
-    st.subheader("Add New Project")
-    col1, col2 = st.columns(2)
-    with col1:
-        new_project_id = st.text_input("Project ID", placeholder="Enter new Project ID", key="new_project_id")
-    with col2:
-        new_email = st.text_input("Email Address", placeholder="Enter email address", key="new_email")
+    # Create tabs for different project management functions
+    tab1, tab2, tab3 = st.tabs(["Add/Edit Projects", "Bulk Import", "View/Export Data"])
     
-    if st.button("Add Project"):
-        if new_project_id and new_email:
-            success, message = add_project_to_excel(new_project_id, new_email)
-            if success:
-                st.success(message)
+    # Tab 1: Add/Edit Projects
+    with tab1:
+        # Add new project section
+        st.subheader("Add New Project")
+        col1, col2 = st.columns(2)
+        with col1:
+            new_project_id = st.text_input("Project ID", placeholder="Enter new Project ID", key="new_project_id")
+        with col2:
+            new_email = st.text_input("Email Address", placeholder="Enter email address", key="new_email")
+        
+        if st.button("Add Project"):
+            if new_project_id and new_email:
+                success, message = add_project_to_sqlite(new_project_id, new_email)
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
             else:
-                st.error(message)
-        else:
-            st.warning("Please enter both Project ID and Email Address")
-    
-    # Display existing projects
-    st.subheader("Existing Projects")
-    try:
-        df = pd.read_excel(EXCEL_FILE)
-        if not df.empty:
-            # Create a dataframe with edit and delete buttons
-            edited_df = df.copy()
+                st.warning("Please enter both Project ID and Email Address")
+        
+        # Edit and Delete section
+        st.subheader("Edit or Delete Project")
+        
+        try:
+            # Get projects from SQLite
+            conn = sqlite3.connect(DB_FILE)
+            df = pd.read_sql_query("SELECT project_id as 'Project ID', email as 'Email ID link' FROM projects", conn)
+            conn.close()
             
-            # Display the dataframe
-            st.dataframe(df)
-            
-            # Edit and Delete section
-            st.subheader("Edit or Delete Project")
-            
-            # Project selection for edit/delete
-            project_options = [""] + df['Project ID'].astype(str).tolist()
-            selected_project = st.selectbox("Select Project ID", options=project_options, key="select_project")
-            
-            if selected_project:
-                col1, col2 = st.columns(2)
+            if not df.empty:
+                # Project selection for edit/delete
+                project_options = [""] + df['Project ID'].astype(str).tolist()
+                selected_project = st.selectbox("Select Project ID", options=project_options, key="select_project")
                 
-                # Get the current email for the selected project
-                current_email = df[df['Project ID'].astype(str) == selected_project]['Email ID link'].iloc[0]
-                
-                # Edit mode
-                with col1:
-                    if st.button("Edit Selected Project"):
-                        st.session_state.edit_mode = True
-                        st.session_state.edit_project_id = selected_project
-                        st.session_state.edit_email = current_email
-                        st.rerun()
-                
-                # Delete mode
-                with col2:
-                    if st.button("Delete Selected Project"):
-                        success, message = delete_project_from_excel(selected_project)
-                        if success:
-                            st.success(message)
+                if selected_project:
+                    col1, col2 = st.columns(2)
+                    
+                    # Get the current email for the selected project
+                    current_email = df[df['Project ID'].astype(str) == selected_project]['Email ID link'].iloc[0]
+                    
+                    # Edit mode
+                    with col1:
+                        if st.button("Edit Selected Project"):
+                            st.session_state.edit_mode = True
+                            st.session_state.edit_project_id = selected_project
+                            st.session_state.edit_email = current_email
                             st.rerun()
-                        else:
-                            st.error(message)
-            
-            # Edit form (shown only in edit mode)
-            if st.session_state.edit_mode:
-                st.subheader("Edit Project")
-                col1, col2 = st.columns(2)
-                with col1:
-                    edited_project_id = st.text_input("New Project ID", value=st.session_state.edit_project_id, key="edit_project_id")
-                with col2:
-                    edited_email = st.text_input("New Email Address", value=st.session_state.edit_email, key="edit_email")
+                    
+                    # Delete mode
+                    with col2:
+                        if st.button("Delete Selected Project"):
+                            success, message = delete_project_from_sqlite(selected_project)
+                            if success:
+                                st.success(message)
+                                st.rerun()
+                            else:
+                                st.error(message)
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("Save Changes"):
-                        success, message = edit_project_in_excel(st.session_state.edit_project_id, edited_project_id, edited_email)
-                        if success:
-                            st.success(message)
+                # Edit form (shown only in edit mode)
+                if st.session_state.edit_mode:
+                    st.subheader("Edit Project")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        edited_project_id = st.text_input("New Project ID", value=st.session_state.edit_project_id, key="edit_project_id")
+                    with col2:
+                        edited_email = st.text_input("New Email Address", value=st.session_state.edit_email, key="edit_email")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Save Changes"):
+                            success, message = edit_project_in_sqlite(st.session_state.edit_project_id, edited_project_id, edited_email)
+                            if success:
+                                st.success(message)
+                                st.session_state.edit_mode = False
+                                st.rerun()
+                            else:
+                                st.error(message)
+                    with col2:
+                        if st.button("Cancel Edit"):
                             st.session_state.edit_mode = False
                             st.rerun()
-                        else:
-                            st.error(message)
+            else:
+                st.info("No projects found in the database")
+        except Exception as e:
+            if "no such table" in str(e).lower():
+                st.info("No projects table found in the database. Add a project to create it.")
+            else:
+                st.error(f"Error reading database: {e}")
+    
+    # Tab 2: Bulk Import
+    with tab2:
+        st.subheader("Bulk Import Projects")
+        
+        # File upload
+        st.write("Upload an Excel or CSV file with columns 'Project ID' and 'Email ID link'")
+        
+        # Show sample format
+        with st.expander("View Sample Format"):
+            sample_df = pd.DataFrame({
+                'Project ID': ['123', '456', '789'],
+                'Email ID link': ['email1@example.com', 'email2@example.com', 'email3@example.com']
+            })
+            st.dataframe(sample_df)
+            
+            # Sample download buttons
+            col1, col2 = st.columns(2)
+            with col1:
+                csv = sample_df.to_csv(index=False)
+                st.download_button(
+                    label="Download Sample CSV",
+                    data=csv,
+                    file_name="sample_projects.csv",
+                    mime="text/csv"
+                )
+            
+            with col2:
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    sample_df.to_excel(writer, index=False)
+                excel_data = buffer.getvalue()
+                st.download_button(
+                    label="Download Sample Excel",
+                    data=excel_data,
+                    file_name="sample_projects.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        
+        uploaded_file = st.file_uploader("Choose a file", type=["csv", "xlsx", "xls"])
+        
+        if uploaded_file is not None:
+            # Preview the uploaded file
+            st.subheader("File Preview")
+            
+            if uploaded_file.name.endswith('.csv'):
+                df_preview = pd.read_csv(uploaded_file)
+                uploaded_file.seek(0)  # Reset file pointer after reading
+            else:  # Excel file
+                df_preview = pd.read_excel(uploaded_file)
+                uploaded_file.seek(0)  # Reset file pointer after reading
+            
+            st.dataframe(df_preview.head(5))
+            
+            # Import button
+            if st.button("Import Projects"):
+                success, message = bulk_import_projects(uploaded_file)
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+    
+    # Tab 3: View/Export Data
+    with tab3:
+        st.subheader("View All Projects")
+        
+        try:
+            # Get projects from SQLite
+            conn = sqlite3.connect(DB_FILE)
+            df = pd.read_sql_query("SELECT project_id as 'Project ID', email as 'Email ID link' FROM projects", conn)
+            conn.close()
+            
+            if not df.empty:
+                # Display the dataframe
+                st.dataframe(df)
+                
+                # Add download buttons
+                st.subheader("Download Project Data")
+                col1, col2 = st.columns(2)
+                
+                # Convert dataframe to CSV
+                csv = df.to_csv(index=False)
+                with col1:
+                    st.download_button(
+                        label="Download as CSV",
+                        data=csv,
+                        file_name="project_data.csv",
+                        mime="text/csv"
+                    )
+                
+                # Convert dataframe to Excel
                 with col2:
-                    if st.button("Cancel Edit"):
-                        st.session_state.edit_mode = False
-                        st.rerun()
-        else:
-            st.info("No projects found in the Excel file")
-    except Exception as e:
-        if "No such file or directory" in str(e):
-            st.info("No Excel file found. Add a project to create it.")
-        else:
-            st.error(f"Error reading Excel file: {e}")
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        df.to_excel(writer, index=False)
+                    excel_data = buffer.getvalue()
+                    st.download_button(
+                        label="Download as Excel",
+                        data=excel_data,
+                        file_name="project_data.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                
+                # View change history
+                st.subheader("Change History")
+                if st.button("Show Change History"):
+                    try:
+                        conn = sqlite3.connect(DB_FILE)
+                        history_df = pd.read_sql_query(
+                            "SELECT timestamp, action, project_id, details FROM change_log ORDER BY timestamp DESC LIMIT 100", 
+                            conn
+                        )
+                        conn.close()
+                        
+                        if not history_df.empty:
+                            st.dataframe(history_df)
+                        else:
+                            st.info("No change history found")
+                    except Exception as e:
+                        st.error(f"Error retrieving change history: {e}")
+            else:
+                st.info("No projects found in the database")
+        except Exception as e:
+            if "no such table" in str(e).lower():
+                st.info("No projects table found in the database. Add a project to create it.")
+            else:
+                st.error(f"Error reading database: {e}")
 
 def main():
     st.title("Project Image Upload System")
