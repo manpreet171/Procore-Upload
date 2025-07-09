@@ -626,8 +626,27 @@ def manage_projects_tab():
             else:
                 st.error(f"Error reading database: {e}")
 
+def init_database():
+    """Initialize the SQLite database and create tables if they don't exist"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # Create projects table if it doesn't exist
+    c.execute('''CREATE TABLE IF NOT EXISTS projects
+                 (project_id text UNIQUE, email text)''')
+    
+    # Create change_log table if it doesn't exist
+    c.execute('''CREATE TABLE IF NOT EXISTS change_log
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, action TEXT, project_id TEXT, details TEXT)''')
+    
+    conn.commit()
+    conn.close()
+
 def main():
     st.title("Project Image Upload System")
+    
+    # Initialize database
+    init_database()
     
     # Create tabs
     tab1, tab2 = st.tabs(["Upload Images", "Manage Projects"])
