@@ -242,7 +242,7 @@ def upload_images_tab():
                     
                     # More reliable way to refresh the page in Streamlit
                     time.sleep(1)  # Brief pause to ensure message is visible
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     # Clean up the temporary files on failure
                     try:
