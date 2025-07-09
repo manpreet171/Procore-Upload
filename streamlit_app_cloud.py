@@ -184,20 +184,30 @@ def verify_password(password):
     return password == ADMIN_PASSWORD
 
 def upload_images_tab():
+    # Initialize session state for form reset
+    if 'form_submitted' not in st.session_state:
+        st.session_state.form_submitted = False
+    
+    if st.session_state.form_submitted:
+        # Reset the flag
+        st.session_state.form_submitted = False
+        # Force a rerun to clear all widgets
+        st.rerun()
+    
     st.header("Upload Images")
     
     # Project ID input
-    project_id = st.text_input("Enter Project ID")
+    project_id = st.text_input("Project ID", placeholder="Enter the Project ID", key="upload_project_id")
     
-    # File uploader
-    uploaded_files = st.file_uploader("Upload Images", type=["png", "jpg", "jpeg", "gif"], accept_multiple_files=True)
+    # File upload
+    uploaded_files = st.file_uploader(
+        "Upload Images", 
+        accept_multiple_files=True,
+        type=list(ALLOWED_EXTENSIONS)
+    )
     
-    if st.button("Upload and Send"):
-        if not project_id:
-            st.error("Please enter a Project ID")
-        elif not uploaded_files:
-            st.error("Please upload at least one image")
-        else:
+    if uploaded_files and project_id:
+        if st.button("Send Images"):
             # Get email for project
             recipient_email = get_email_for_project(project_id)
             
@@ -240,8 +250,13 @@ def upload_images_tab():
                     except Exception as e:
                         st.warning(f"Could not clean up temporary files: {str(e)}")
                     
-                    # More reliable way to refresh the page in Streamlit
-                    time.sleep(1)  # Brief pause to ensure message is visible
+                    # Set the form submitted flag to trigger a complete reset
+                    st.session_state.form_submitted = True
+                    
+                    # Brief pause to ensure message is visible
+                    time.sleep(1)
+                    
+                    # Force a complete refresh
                     st.rerun()
                 else:
                     # Clean up the temporary files on failure
