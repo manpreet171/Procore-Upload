@@ -178,6 +178,59 @@ def add_project_to_excel(project_id, email):
     except Exception as e:
         return False, f"Error adding project: {e}"
 
+def edit_project_in_excel(old_project_id, new_project_id, new_email):
+    """Edit an existing project ID and email in the Excel file"""
+    try:
+        # Check if Excel file exists
+        if not os.path.exists(EXCEL_FILE):
+            return False, "Excel file does not exist"
+        
+        # Read existing data
+        df = pd.read_excel(EXCEL_FILE)
+        
+        # Find the row with the old project ID
+        mask = df['Project ID'].astype(str) == str(old_project_id)
+        if not mask.any():
+            return False, f"Project ID {old_project_id} not found"
+        
+        # If new project ID is different from old one, check if it already exists
+        if str(old_project_id) != str(new_project_id) and str(new_project_id) in df['Project ID'].astype(str).values:
+            return False, f"Project ID {new_project_id} already exists"
+        
+        # Update the row
+        df.loc[mask, 'Project ID'] = new_project_id
+        df.loc[mask, 'Email ID link'] = new_email
+        
+        # Save back to Excel
+        df.to_excel(EXCEL_FILE, index=False)
+        return True, "Project updated successfully"
+    except Exception as e:
+        return False, f"Error updating project: {e}"
+
+def delete_project_from_excel(project_id):
+    """Delete a project from the Excel file"""
+    try:
+        # Check if Excel file exists
+        if not os.path.exists(EXCEL_FILE):
+            return False, "Excel file does not exist"
+        
+        # Read existing data
+        df = pd.read_excel(EXCEL_FILE)
+        
+        # Find the row with the project ID
+        mask = df['Project ID'].astype(str) == str(project_id)
+        if not mask.any():
+            return False, f"Project ID {project_id} not found"
+        
+        # Remove the row
+        df = df[~mask]
+        
+        # Save back to Excel
+        df.to_excel(EXCEL_FILE, index=False)
+        return True, "Project deleted successfully"
+    except Exception as e:
+        return False, f"Error deleting project: {e}"
+
 def verify_password(password):
     """Verify if the provided password matches the admin password"""
     # In a production environment, use a more secure password hashing method
@@ -283,6 +336,12 @@ def manage_projects_tab():
     # If password is correct, remove the password field and show the content
     password_placeholder.empty()
     
+    # Initialize session state for edit mode
+    if 'edit_mode' not in st.session_state:
+        st.session_state.edit_mode = False
+        st.session_state.edit_project_id = ""
+        st.session_state.edit_email = ""
+    
     # Add new project section
     st.subheader("Add New Project")
     col1, col2 = st.columns(2)
@@ -306,7 +365,66 @@ def manage_projects_tab():
     try:
         df = pd.read_excel(EXCEL_FILE)
         if not df.empty:
+            # Create a dataframe with edit and delete buttons
+            edited_df = df.copy()
+            
+            # Display the dataframe
             st.dataframe(df)
+            
+            # Edit and Delete section
+            st.subheader("Edit or Delete Project")
+            
+            # Project selection for edit/delete
+            project_options = [""] + df['Project ID'].astype(str).tolist()
+            selected_project = st.selectbox("Select Project ID", options=project_options, key="select_project")
+            
+            if selected_project:
+                col1, col2 = st.columns(2)
+                
+                # Get the current email for the selected project
+                current_email = df[df['Project ID'].astype(str) == selected_project]['Email ID link'].iloc[0]
+                
+                # Edit mode
+                with col1:
+                    if st.button("Edit Selected Project"):
+                        st.session_state.edit_mode = True
+                        st.session_state.edit_project_id = selected_project
+                        st.session_state.edit_email = current_email
+                        st.rerun()
+                
+                # Delete mode
+                with col2:
+                    if st.button("Delete Selected Project"):
+                        success, message = delete_project_from_excel(selected_project)
+                        if success:
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+            
+            # Edit form (shown only in edit mode)
+            if st.session_state.edit_mode:
+                st.subheader("Edit Project")
+                col1, col2 = st.columns(2)
+                with col1:
+                    edited_project_id = st.text_input("New Project ID", value=st.session_state.edit_project_id, key="edit_project_id")
+                with col2:
+                    edited_email = st.text_input("New Email Address", value=st.session_state.edit_email, key="edit_email")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Save Changes"):
+                        success, message = edit_project_in_excel(st.session_state.edit_project_id, edited_project_id, edited_email)
+                        if success:
+                            st.success(message)
+                            st.session_state.edit_mode = False
+                            st.rerun()
+                        else:
+                            st.error(message)
+                with col2:
+                    if st.button("Cancel Edit"):
+                        st.session_state.edit_mode = False
+                        st.rerun()
         else:
             st.info("No projects found in the Excel file")
     except Exception as e:
