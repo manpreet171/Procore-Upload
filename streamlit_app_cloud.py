@@ -184,17 +184,30 @@ def edit_project_in_sqlite(old_project_id, new_project_id, new_email):
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         
-        # Find the row with the old project ID
+        # Check if the project exists
         c.execute("SELECT * FROM projects WHERE project_id = ?", (old_project_id,))
         if not c.fetchone():
+            conn.close()
             return False, f"Project ID {old_project_id} not found"
         
-        # If new project ID is different from old one, check if it already exists
-        if old_project_id != new_project_id and c.execute("SELECT * FROM projects WHERE project_id = ?", (new_project_id,)).fetchone():
-            return False, f"Project ID {new_project_id} already exists"
+        # Check if the new project ID already exists (if it's different from the old one)
+        if old_project_id != new_project_id:
+            c.execute("SELECT * FROM projects WHERE project_id = ?", (new_project_id,))
+            if c.fetchone():
+                conn.close()
+                return False, f"Project ID {new_project_id} already exists"
         
-        # Update the row
-        c.execute("UPDATE projects SET project_id = ?, email = ? WHERE project_id = ?", (new_project_id, new_email, old_project_id))
+        # Update the project
+        c.execute("UPDATE projects SET project_id = ?, email = ? WHERE project_id = ?", 
+                 (new_project_id, new_email, old_project_id))
+        
+        # Log the change
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        c.execute('''CREATE TABLE IF NOT EXISTS change_log
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, action TEXT, project_id TEXT, details TEXT)''')
+        c.execute("INSERT INTO change_log (timestamp, action, project_id, details) VALUES (?, ?, ?, ?)",
+                 (timestamp, "edit", old_project_id, f"Changed to Project ID: {new_project_id}, Email: {new_email}"))
+        
         conn.commit()
         conn.close()
         return True, "Project updated successfully"
