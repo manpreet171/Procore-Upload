@@ -456,7 +456,7 @@ def manage_projects_tab():
                             st.session_state.edit_mode = True
                             st.session_state.edit_project_id = selected_project
                             st.session_state.edit_email = current_email
-                            st.rerun()
+                            st.experimental_rerun()
                     
                     # Delete mode
                     with col2:
@@ -464,7 +464,7 @@ def manage_projects_tab():
                             success, message = delete_project_from_sqlite(selected_project)
                             if success:
                                 st.success(message)
-                                st.rerun()
+                                st.experimental_rerun()
                             else:
                                 st.error(message)
                 
@@ -484,13 +484,13 @@ def manage_projects_tab():
                             if success:
                                 st.success(message)
                                 st.session_state.edit_mode = False
-                                st.rerun()
+                                st.experimental_rerun()
                             else:
                                 st.error(message)
                     with col2:
                         if st.button("Cancel Edit"):
                             st.session_state.edit_mode = False
-                            st.rerun()
+                            st.experimental_rerun()
             else:
                 st.info("No projects found in the database")
         except Exception as e:

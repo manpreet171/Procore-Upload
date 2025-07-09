@@ -29,6 +29,10 @@ token.json
 *.env
 config.py
 
+# Excel temporary files
+~$*.xlsx
+~$*.xls
+
 # OS specific
 .DS_Store
 Thumbs.db
