@@ -12,6 +12,8 @@ import datetime
 import requests
 import shutil
 import uuid
+import tempfile
+import subprocess
 
 # Set page configuration
 st.set_page_config(
@@ -102,6 +104,34 @@ def git_commit_and_push(file_path, commit_message):
         return True, "Successfully pushed changes to GitHub"
     except Exception as e:
         return False, f"Error with Git operations: {e}"
+
+# SSH key handling for GitHub authentication
+def setup_ssh_key():
+    try:
+        # Create a temporary directory for the SSH key
+        ssh_dir = tempfile.mkdtemp()
+        
+        # Generate a new SSH key pair
+        ssh_key_path = os.path.join(ssh_dir, 'id_rsa')
+        subprocess.run(['ssh-keygen', '-t', 'rsa', '-N', '', '-f', ssh_key_path])
+        
+        # Get the public SSH key
+        with open(ssh_key_path + '.pub', 'r') as f:
+            public_ssh_key = f.read()
+        
+        # Add the SSH key to the GitHub repository
+        repo = git.Repo('.')
+        repo.git.config('user.name', 'Streamlit App')
+        repo.git.config('user.email', 'streamlit-app@example.com')
+        repo.git.remote('set-url', '--add', 'origin', f'git@github.com:{st.secrets["GITHUB_USERNAME"]}/{st.secrets["GITHUB_REPO"]}.git')
+        repo.git.config('core.sshCommand', f'ssh -i {ssh_key_path} -o "StrictHostKeyChecking=no"')
+        
+        # Return the public SSH key
+        return public_ssh_key
+    
+    except Exception as e:
+        st.error(f"Error setting up SSH key: {e}")
+        return None
 
 # CSV operations
 def get_projects_from_csv():
