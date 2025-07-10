@@ -53,17 +53,55 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 # Git operations
-def git_pull():
-    """Pull latest changes from GitHub repository"""
+def setup_github_auth():
+    """Setup GitHub authentication using token from secrets"""
     try:
+        # Check if we're in a git repository
         repo = git.Repo('.')
         
-        # Configure Git credentials if available in secrets
+        # Configure Git user
         if 'GITHUB_USERNAME' in st.secrets and 'GITHUB_EMAIL' in st.secrets:
             repo.git.config('user.name', st.secrets['GITHUB_USERNAME'])
             repo.git.config('user.email', st.secrets['GITHUB_EMAIL'])
         
-        repo.git.pull()
+        # Set up HTTPS authentication with token
+        if 'GITHUB_TOKEN' in st.secrets and 'GITHUB_USERNAME' in st.secrets:
+            username = st.secrets['GITHUB_USERNAME']
+            token = st.secrets['GITHUB_TOKEN']
+            repo_name = st.secrets.get('GITHUB_REPO', 'Procore-Upload')
+            
+            # Set the remote URL with token authentication
+            new_url = f"https://{username}:{token}@github.com/{username}/{repo_name}.git"
+            
+            # Check if remote exists
+            try:
+                remote_url = repo.git.remote('get-url', 'origin')
+                # Update existing remote
+                repo.git.remote('set-url', 'origin', new_url)
+            except git.GitCommandError:
+                # Remote doesn't exist, add it
+                repo.git.remote('add', 'origin', new_url)
+        
+        return True, "GitHub authentication set up successfully"
+    except Exception as e:
+        return False, f"Error setting up GitHub authentication: {e}"
+
+def git_pull():
+    """Pull latest changes from GitHub repository"""
+    try:
+        # Set up GitHub authentication
+        setup_github_auth()
+        
+        # Pull changes
+        repo = git.Repo('.')
+        try:
+            repo.git.pull('origin', 'main')
+        except git.GitCommandError:
+            try:
+                repo.git.pull('origin', 'master')
+            except git.GitCommandError:
+                pass  # Ignore if both fail
+        
         return True, "Successfully pulled latest changes"
     except Exception as e:
         return False, f"Error pulling from GitHub: {e}"
@@ -71,67 +109,38 @@ def git_pull():
 def git_commit_and_push(file_path, commit_message):
     """Commit and push changes to GitHub repository"""
     try:
+        # Set up GitHub authentication
+        setup_github_auth()
+        
         repo = git.Repo('.')
         
-        # Configure Git credentials if available in secrets
-        if 'GITHUB_USERNAME' in st.secrets and 'GITHUB_EMAIL' in st.secrets:
-            repo.git.config('user.name', st.secrets['GITHUB_USERNAME'])
-            repo.git.config('user.email', st.secrets['GITHUB_EMAIL'])
-        else:
-            # Check if Git user is configured
-            try:
-                # Try to get user config
-                user_name = repo.git.config('--get', 'user.name')
-                user_email = repo.git.config('--get', 'user.email')
-            except git.GitCommandError:
-                # If not configured, set a default identity for this repository only
-                repo.git.config('user.email', 'streamlit-app@example.com')
-                repo.git.config('user.name', 'Streamlit App')
-                st.warning("Git user not configured. Using default identity for this session.")
-        
-        # Add, commit and push
+        # Add and commit
         repo.git.add(file_path)
+        
+        # Check if there are changes to commit
+        if not repo.git.diff('--staged'):
+            return True, "No changes to commit"
+            
         repo.git.commit('-m', commit_message)
         
+        # Try to push to main branch first, then master if that fails
         try:
-            repo.git.push()
-        except git.GitCommandError as e:
-            # If push fails, we'll still return success for the commit
-            # This allows the app to work locally without GitHub access
-            st.warning(f"Changes committed locally but not pushed to GitHub: {e}")
-            return True, "Changes saved locally (not pushed to GitHub)"
-            
+            repo.git.push('origin', 'main')
+        except git.GitCommandError:
+            try:
+                repo.git.push('origin', 'master')
+            except git.GitCommandError:
+                # If both fail, try to push to current branch
+                current_branch = repo.active_branch.name
+                try:
+                    repo.git.push('origin', current_branch)
+                except git.GitCommandError as e:
+                    st.warning(f"Changes committed locally but not pushed to GitHub: {e}")
+                    return True, "Changes saved locally (not pushed to GitHub)"
+        
         return True, "Successfully pushed changes to GitHub"
     except Exception as e:
         return False, f"Error with Git operations: {e}"
-
-# SSH key handling for GitHub authentication
-def setup_ssh_key():
-    try:
-        # Create a temporary directory for the SSH key
-        ssh_dir = tempfile.mkdtemp()
-        
-        # Generate a new SSH key pair
-        ssh_key_path = os.path.join(ssh_dir, 'id_rsa')
-        subprocess.run(['ssh-keygen', '-t', 'rsa', '-N', '', '-f', ssh_key_path])
-        
-        # Get the public SSH key
-        with open(ssh_key_path + '.pub', 'r') as f:
-            public_ssh_key = f.read()
-        
-        # Add the SSH key to the GitHub repository
-        repo = git.Repo('.')
-        repo.git.config('user.name', 'Streamlit App')
-        repo.git.config('user.email', 'streamlit-app@example.com')
-        repo.git.remote('set-url', '--add', 'origin', f'git@github.com:{st.secrets["GITHUB_USERNAME"]}/{st.secrets["GITHUB_REPO"]}.git')
-        repo.git.config('core.sshCommand', f'ssh -i {ssh_key_path} -o "StrictHostKeyChecking=no"')
-        
-        # Return the public SSH key
-        return public_ssh_key
-    
-    except Exception as e:
-        st.error(f"Error setting up SSH key: {e}")
-        return None
 
 # CSV operations
 def get_projects_from_csv():
@@ -562,12 +571,6 @@ def upload_images_tab():
                     
                     # Force a complete refresh
                     st.rerun()
-                else:
-                    # Clean up the temporary files on failure
-                    try:
-                        shutil.rmtree(upload_dir)
-                    except:
-                        pass
 
 def bulk_import_projects(uploaded_file):
     """Import multiple projects from an uploaded Excel or CSV file"""
