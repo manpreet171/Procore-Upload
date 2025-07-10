@@ -557,30 +557,41 @@ def verify_password(password):
     return password == ADMIN_PASSWORD
 
 def upload_images_tab():
-    # Initialize session state for form reset
+    # Initialize session state variables if they don't exist
     if 'form_submitted' not in st.session_state:
         st.session_state.form_submitted = False
     
+    # Create unique keys for form elements that will be reset
+    form_key_prefix = "upload_form_" + str(int(time.time()))
+    project_id_key = f"{form_key_prefix}_project_id"
+    status_key = f"{form_key_prefix}_status"
+    file_uploader_key = f"{form_key_prefix}_files"
+    
+    # Check if we need to reset the form
     if st.session_state.form_submitted:
         # Reset the flag
         st.session_state.form_submitted = False
-        # Force a rerun to clear all widgets
+        # Show a temporary success message
+        st.success("Images sent successfully! Form has been reset.")
+        # Force a rerun with clean state
+        time.sleep(1.5)  # Give user time to see the message
         st.rerun()
     
     st.header("Upload Images")
     
-    # Project ID input
-    project_id = st.text_input("Project ID", placeholder="Enter the Project ID", key="upload_project_id")
+    # Project ID input with dynamic key
+    project_id = st.text_input("Project ID", placeholder="Enter the Project ID", key=project_id_key)
     
-    # Status dropdown
+    # Status dropdown with dynamic key
     status_options = ["PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
-    status = st.selectbox("Status", options=status_options, key="upload_status")
+    status = st.selectbox("Status", options=status_options, key=status_key)
     
-    # File upload
+    # File upload with dynamic key
     uploaded_files = st.file_uploader(
         "Upload Images", 
         accept_multiple_files=True,
-        type=list(ALLOWED_EXTENSIONS)
+        type=list(ALLOWED_EXTENSIONS),
+        key=file_uploader_key
     )
     
     if uploaded_files and project_id:
@@ -634,13 +645,11 @@ def upload_images_tab():
                     except Exception as e:
                         st.warning(f"Could not clean up temporary files: {str(e)}")
                     
-                    # Set the form submitted flag to trigger a complete reset
+                    # Set the form submitted flag to trigger a complete reset on next rerun
                     st.session_state.form_submitted = True
                     
-                    # Brief pause to ensure message is visible
-                    time.sleep(1)
-                    
                     # Force a complete refresh
+                    time.sleep(1)  # Give user time to see the success message
                     st.rerun()
 
 def bulk_import_projects(uploaded_file):
