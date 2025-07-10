@@ -718,9 +718,9 @@ def manage_projects_tab():
                     st.subheader("Edit Project")
                     col1, col2 = st.columns(2)
                     with col1:
-                        edited_project_id = st.text_input("New Project ID", value=st.session_state.edit_project_id, key="edit_project_id")
+                        edited_project_id = st.text_input("New Project ID", value=st.session_state.edit_project_id, key="edited_project_id_input")
                     with col2:
-                        edited_email = st.text_input("New Email Address", value=st.session_state.edit_email, key="edit_email")
+                        edited_email = st.text_input("New Email Address", value=st.session_state.edit_email, key="edited_email_input")
                     
                     col1, col2 = st.columns(2)
                     with col1:
