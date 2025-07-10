@@ -611,8 +611,8 @@ def upload_images_tab():
                     saved_files.append(file_path)
                 
                 # Send email
-                subject = f"Images for Project ID: {project_id}"
-                body = f"Please find attached images for Project ID: {project_id}"
+                subject = f"{status} Images"
+                body = f"Please find attached {status} images."
                 
                 if send_email(recipient_email, subject, body, saved_files):
                     # Send Slack notification if webhook URL is configured
