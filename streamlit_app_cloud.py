@@ -166,28 +166,15 @@ def get_email_for_project(project_id):
     """Get email for a specific project ID"""
     try:
         df = get_projects_from_csv()
-        
-        # Debug: Print CSV contents to help diagnose issues
-        st.sidebar.expander("Debug: CSV Contents").write(df)
-        
         # Convert project_id to string for comparison
         project_id_str = str(project_id).strip()
-        
-        # Debug: Show what we're searching for
-        st.sidebar.text(f"Looking for project ID: '{project_id_str}'")
         
         # Find the row with matching project ID
         matching_row = df[df['Project ID'].astype(str).str.strip() == project_id_str]
         
-        # Debug: Show if we found a match
         if not matching_row.empty:
-            st.sidebar.success(f"Found email: {matching_row['Email ID link'].iloc[0]}")
             return matching_row['Email ID link'].iloc[0]
         else:
-            st.sidebar.error(f"No email found for project ID: {project_id_str}")
-            # Debug: Show all project IDs for comparison
-            all_ids = df['Project ID'].astype(str).str.strip().tolist()
-            st.sidebar.text(f"Available project IDs: {all_ids}")
             return None
     except Exception as e:
         st.error(f"Error getting email for project: {e}")
