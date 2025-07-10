@@ -18,11 +18,12 @@
 The Project Image Upload System allows you to easily upload images for specific projects and automatically send them to the appropriate recipients by email. This system helps streamline the process of sharing project images with team members and stakeholders.
 
 Key features include:
-- Upload multiple images for specific projects
-- Automatic email sending to project contacts
+- Upload multiple images for specific projects with status categorization
+- Automatic email sending to project contacts with status-labeled attachments
 - Project management (add, edit, delete projects)
 - Bulk import of project data
 - View and export project data
+- Persistent data storage using GitHub integration
 
 ## Getting Started
 
@@ -38,17 +39,26 @@ To upload images for a project:
 
 1. Click on the **Upload Images** tab
 2. Enter the **Project ID** in the text field
-3. Click the **Browse files** button to select images from your computer
+3. Select a **Status** from the dropdown menu:
+   - **PRODUCTION**: For production-related images
+   - **SHIPPED**: For shipping-related images
+   - **PICKUP**: For pickup-related images
+   - **INSTALLATION**: For installation-related images
+4. Click the **Browse files** button to select images from your computer
    - You can select multiple images at once
    - Supported formats: JPG, JPEG, PNG
-4. Once you've selected your images, they will appear in the preview area
-5. Click the **Upload** button to process the images
-6. The system will:
+5. Once you've selected your images, they will appear in the preview area
+6. Click the **Send Images** button to process the images
+7. The system will:
    - Verify the Project ID exists
+   - Rename the images with the selected status (e.g., "PRODUCTION-1.jpg")
    - Send the images to the email address associated with the project
    - Display a success message when complete
+   - Automatically reset the form for a new submission
 
 **Note**: If the Project ID doesn't exist in the system, you'll receive an error message. You'll need to add the project first using the Manage Projects tab.
+
+**Email Format**: The email will have a subject line with the status (e.g., "PRODUCTION Images") and will include the renamed image files as attachments.
 
 ## Managing Projects
 
@@ -122,7 +132,7 @@ To view or export your project data:
 - **Solution**: Check that you've entered the correct Project ID. Go to the Manage Projects tab to verify the project exists or to add it.
 
 **Problem**: Images not sending to email
-- **Solution**: Verify the email address associated with the project is correct by checking in the Manage Projects tab.
+- **Solution**: Verify the email address associated with the project is correct by checking in the Manage Projects tab. If the email address is correct, check the Email Sending Log in the Upload Images tab for detailed information about any errors.
 
 **Problem**: Can't access Manage Projects tab
 - **Solution**: Make sure you're entering the correct admin password. If you've forgotten the password, contact your system administrator.
@@ -130,10 +140,16 @@ To view or export your project data:
 **Problem**: Bulk import shows many skipped entries
 - **Solution**: Skipped entries are usually duplicates (Project IDs that already exist in the system). Check your import file for duplicate Project IDs.
 
+**Problem**: Form doesn't reset after submission
+- **Solution**: The form should automatically reset after a successful submission. If it doesn't, try refreshing the page or check for any error messages in the Email Sending Log.
+
 ## FAQ
 
 **Q: How many images can I upload at once?**
-A: You can select multiple images at once, but very large uploads (over 25MB total) may take longer to process.
+A: You can select multiple images at once, but very large uploads (over 25MB total) may take longer to process. The email system has a 10MB limit for all attachments combined.
+
+**Q: What does the Status field do?**
+A: The Status field categorizes your images and determines how they are renamed before being sent. For example, selecting "PRODUCTION" will rename your images as "PRODUCTION-1.jpg", "PRODUCTION-2.jpg", etc. This helps the recipient identify the type of images they're receiving.
 
 **Q: Can I change the email address for a project?**
 A: Yes, use the Edit function in the Manage Projects tab to update the email address.
@@ -142,10 +158,16 @@ A: Yes, use the Edit function in the Manage Projects tab to update the email add
 A: No, you can add as many projects as needed.
 
 **Q: Can multiple people use the system at the same time?**
-A: Yes, the system supports multiple users accessing it simultaneously.
+A: Yes, the system supports multiple users accessing it simultaneously. All data is synchronized using GitHub to ensure everyone sees the most up-to-date information.
 
 **Q: How do I know if my changes were saved?**
 A: The system will display a success message after each action. You can also check the change history in the View/Export Data tab.
 
 **Q: Can I see who made changes to the project data?**
 A: The change history shows when changes were made, but not who made them. Contact your administrator if you need user-specific tracking.
+
+**Q: What happens if there's no internet connection?**
+A: The system will continue to work with local data storage. When the connection is restored, it will automatically synchronize with GitHub.
+
+**Q: Can I see details about email sending errors?**
+A: Yes, the Upload Images tab includes an Email Sending Log that shows detailed information about the email sending process, including any errors that occur.
