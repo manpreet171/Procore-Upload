@@ -512,6 +512,10 @@ def upload_images_tab():
     # Project ID input
     project_id = st.text_input("Project ID", placeholder="Enter the Project ID", key="upload_project_id")
     
+    # Status dropdown
+    status_options = ["PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
+    status = st.selectbox("Status", options=status_options, key="upload_status")
+    
     # File upload
     uploaded_files = st.file_uploader(
         "Upload Images", 
@@ -531,10 +535,17 @@ def upload_images_tab():
                 upload_dir = os.path.join(UPLOAD_FOLDER, str(uuid.uuid4()))
                 os.makedirs(upload_dir, exist_ok=True)
                 
-                # Save uploaded files
+                # Save uploaded files with renamed format based on status
                 saved_files = []
-                for uploaded_file in uploaded_files:
-                    file_path = os.path.join(upload_dir, uploaded_file.name)
+                for i, uploaded_file in enumerate(uploaded_files, 1):
+                    # Get file extension
+                    _, file_extension = os.path.splitext(uploaded_file.name)
+                    
+                    # Create new filename with status and index
+                    new_filename = f"{status}-{i}{file_extension}"
+                    file_path = os.path.join(upload_dir, new_filename)
+                    
+                    # Save the file with new name
                     with open(file_path, "wb") as f:
                         f.write(uploaded_file.getbuffer())
                     saved_files.append(file_path)
@@ -548,14 +559,14 @@ def upload_images_tab():
                     if SLACK_WEBHOOK_URL:
                         try:
                             slack_message = {
-                                "text": f" New images uploaded for Project ID: {project_id}"
+                                "text": f"New images uploaded for Project ID: {project_id}"
                             }
                             requests.post(SLACK_WEBHOOK_URL, json=slack_message)
                         except Exception as e:
                             st.warning(f"Could not send Slack notification: {str(e)}")
                     
                     # Show success message without revealing email
-                    st.success(" Images sent successfully!")
+                    st.success("Images sent successfully!")
                     
                     # Clean up the temporary files
                     try:
