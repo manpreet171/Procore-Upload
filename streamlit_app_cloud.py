@@ -448,9 +448,25 @@ def send_email(recipient_email, subject, body, file_paths):
                     file_content = file.read()
                     total_size += len(file_content)
                     file_name = os.path.basename(file_path)
-                    attachment = MIMEApplication(file_content, _subtype=file_path.split('.')[-1])
+                    
+                    # Get the correct file extension and MIME subtype
+                    file_extension = os.path.splitext(file_path)[1].lower().lstrip('.')
+                    
+                    # Map common image extensions to MIME subtypes
+                    mime_subtypes = {
+                        'jpg': 'jpeg',
+                        'jpeg': 'jpeg',
+                        'png': 'png',
+                        'gif': 'gif'
+                    }
+                    subtype = mime_subtypes.get(file_extension, 'octet-stream')
+                    
+                    attachment = MIMEApplication(file_content, _subtype=subtype)
                     attachment.add_header('Content-Disposition', f'attachment; filename="{file_name}"')
                     msg.attach(attachment)
+                    
+                    # Debug info
+                    st.sidebar.info(f"Attached file: {file_name} with MIME subtype: {subtype}")
             except Exception as e:
                 st.error(f" Error attaching file {file_path}: {str(e)}")
                 return False
