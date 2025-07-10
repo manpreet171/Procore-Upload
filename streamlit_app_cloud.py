@@ -55,6 +55,12 @@ def git_pull():
     """Pull latest changes from GitHub repository"""
     try:
         repo = git.Repo('.')
+        
+        # Configure Git credentials if available in secrets
+        if 'GITHUB_USERNAME' in st.secrets and 'GITHUB_EMAIL' in st.secrets:
+            repo.git.config('user.name', st.secrets['GITHUB_USERNAME'])
+            repo.git.config('user.email', st.secrets['GITHUB_EMAIL'])
+        
         repo.git.pull()
         return True, "Successfully pulled latest changes"
     except Exception as e:
@@ -64,12 +70,38 @@ def git_commit_and_push(file_path, commit_message):
     """Commit and push changes to GitHub repository"""
     try:
         repo = git.Repo('.')
+        
+        # Configure Git credentials if available in secrets
+        if 'GITHUB_USERNAME' in st.secrets and 'GITHUB_EMAIL' in st.secrets:
+            repo.git.config('user.name', st.secrets['GITHUB_USERNAME'])
+            repo.git.config('user.email', st.secrets['GITHUB_EMAIL'])
+        else:
+            # Check if Git user is configured
+            try:
+                # Try to get user config
+                user_name = repo.git.config('--get', 'user.name')
+                user_email = repo.git.config('--get', 'user.email')
+            except git.GitCommandError:
+                # If not configured, set a default identity for this repository only
+                repo.git.config('user.email', 'streamlit-app@example.com')
+                repo.git.config('user.name', 'Streamlit App')
+                st.warning("Git user not configured. Using default identity for this session.")
+        
+        # Add, commit and push
         repo.git.add(file_path)
         repo.git.commit('-m', commit_message)
-        repo.git.push()
+        
+        try:
+            repo.git.push()
+        except git.GitCommandError as e:
+            # If push fails, we'll still return success for the commit
+            # This allows the app to work locally without GitHub access
+            st.warning(f"Changes committed locally but not pushed to GitHub: {e}")
+            return True, "Changes saved locally (not pushed to GitHub)"
+            
         return True, "Successfully pushed changes to GitHub"
     except Exception as e:
-        return False, f"Error pushing to GitHub: {e}"
+        return False, f"Error with Git operations: {e}"
 
 # CSV operations
 def get_projects_from_csv():
