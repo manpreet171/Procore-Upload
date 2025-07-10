@@ -418,27 +418,50 @@ if not os.path.exists(UPLOAD_FOLDER):
 
 def send_email(recipient_email, subject, body, file_paths):
     """Send email with attachments using Brevo SMTP"""
+    
+    # Initialize email log in session state if it doesn't exist
+    if 'email_log' not in st.session_state:
+        st.session_state.email_log = []
+    
+    # Function to add log entries
+    def log_entry(level, message):
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        st.session_state.email_log.append({"time": timestamp, "level": level, "message": message})
+    
     try:
+        # Clear previous logs if this is a new email attempt
+        if len(st.session_state.email_log) > 20:  # Keep logs manageable
+            st.session_state.email_log = []
+        
+        # Log email configuration
+        log_entry("info", f"Starting email to: {recipient_email}")
+        log_entry("info", f"SMTP Server: {BREVO_SMTP_SERVER}:{BREVO_SMTP_PORT}")
+        log_entry("info", f"From: {EMAIL_SENDER}")
+        
         # Check if files exist and are readable
         valid_files = []
         for file_path in file_paths:
             if os.path.exists(file_path) and os.access(file_path, os.R_OK):
                 valid_files.append(file_path)
+                log_entry("success", f"File valid: {os.path.basename(file_path)}")
             else:
+                log_entry("error", f"File not accessible: {file_path}")
                 st.error(f" File not accessible: {file_path}")
         
         if not valid_files:
+            log_entry("error", "No valid files to attach!")
             st.error("No valid files to attach!")
             return False
         
         # Create message
         msg = MIMEMultipart()
-        msg['From'] = f"{EMAIL_SENDER_NAME} {EMAIL_SENDER}"
+        msg['From'] = f"{EMAIL_SENDER_NAME} <{EMAIL_SENDER}>"  # Fixed format
         msg['To'] = recipient_email
         msg['Subject'] = subject
         
         # Add HTML body
         msg.attach(MIMEText(f"<html><body>{body}</body></html>", 'html'))
+        log_entry("success", "Email body attached")
         
         # Attach files
         total_size = 0
@@ -465,46 +488,67 @@ def send_email(recipient_email, subject, body, file_paths):
                     attachment.add_header('Content-Disposition', f'attachment; filename="{file_name}"')
                     msg.attach(attachment)
                     
-                    # Debug info
-                    st.sidebar.info(f"Attached file: {file_name} with MIME subtype: {subtype}")
+                    # Log attachment
+                    log_entry("success", f"Attached: {file_name} ({len(file_content)/1024:.1f} KB, type: {subtype})")
             except Exception as e:
+                log_entry("error", f"Error attaching file {file_path}: {str(e)}")
                 st.error(f" Error attaching file {file_path}: {str(e)}")
                 return False
         
         # Check if email size is too large (Brevo limit is 10MB)
+        log_entry("info", f"Total email size: {total_size/1024/1024:.2f} MB")
         if total_size > 10 * 1024 * 1024:
+            log_entry("error", f"Email size exceeds Brevo's 10MB limit! ({total_size/1024/1024:.2f} MB)")
             st.error(" Email size exceeds Brevo's 10MB limit!")
             return False
         
         # Connect to server and send email
         try:
+            log_entry("info", "Connecting to SMTP server...")
             server = smtplib.SMTP(BREVO_SMTP_SERVER, BREVO_SMTP_PORT)
+            log_entry("info", "Connected to SMTP server")
+            
+            log_entry("info", "Starting TLS...")
             server.ehlo()
             server.starttls()
+            log_entry("info", "TLS started")
+            
+            log_entry("info", "Logging in...")
             server.login(BREVO_SMTP_LOGIN, BREVO_SMTP_PASSWORD)
+            log_entry("success", "Login successful")
             
             text = msg.as_string()
             
             # Send the email
+            log_entry("info", f"Sending email to {recipient_email}...")
             send_result = server.sendmail(EMAIL_SENDER, [recipient_email], text)
             
             # Check if there were any failed recipients
             if send_result:
+                log_entry("error", f"Failed to deliver to some recipients: {send_result}")
                 st.error(" Failed to deliver to some recipients")
                 server.quit()
                 return False
-                
+            
+            log_entry("success", "Email sent successfully!")
             server.quit()
             return True
             
-        except smtplib.SMTPAuthenticationError:
+        except smtplib.SMTPAuthenticationError as auth_error:
+            log_entry("error", f"Authentication failed: {auth_error}")
             st.error(" Authentication failed! Please check your SMTP login and password.")
             return False
-        except smtplib.SMTPException as e:
-            st.error(f" SMTP error: {str(e)}")
+        except smtplib.SMTPException as smtp_error:
+            log_entry("error", f"SMTP error: {smtp_error}")
+            st.error(f" SMTP error: {str(smtp_error)}")
+            return False
+        except Exception as e:
+            log_entry("error", f"Unexpected error during email sending: {e}")
+            st.error(f" Error sending email: {str(e)}")
             return False
             
     except Exception as e:
+        log_entry("error", f"General error in send_email function: {e}")
         st.error(f" Error sending email: {str(e)}")
         return False
 
