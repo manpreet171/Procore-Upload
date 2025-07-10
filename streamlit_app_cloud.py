@@ -9,11 +9,55 @@ import time
 import io
 import git
 import datetime
+import requests
+import shutil
+import uuid
+
+# Set page configuration
+st.set_page_config(
+    page_title="Project Image Upload",
+    page_icon="📷",
+    layout="centered"
+)
 
 # File paths
 UPLOAD_FOLDER = "uploads"
 CSV_FILE = "Procore Project Email List.csv"
 CHANGE_LOG_FILE = "change_log.csv"
+
+# Configuration - use secrets if available, otherwise use defaults
+# For local development, you can use .streamlit/secrets.toml
+# For Streamlit Cloud, set these in the Streamlit Cloud dashboard
+if 'EMAIL_SENDER' in st.secrets:
+    EMAIL_SENDER = st.secrets["EMAIL_SENDER"]
+    EMAIL_SENDER_NAME = st.secrets.get("EMAIL_SENDER_NAME", "Project Upload")
+    # For Brevo SMTP configuration
+    BREVO_SMTP_SERVER = st.secrets.get("BREVO_SMTP_SERVER", "smtp-relay.brevo.com")
+    BREVO_SMTP_PORT = st.secrets.get("BREVO_SMTP_PORT", 587)
+    BREVO_SMTP_LOGIN = st.secrets.get("BREVO_SMTP_LOGIN", "919624001@smtp-brevo.com")
+    BREVO_SMTP_PASSWORD = st.secrets.get("BREVO_SMTP_PASSWORD", "JVgNcDARtEBXyKYG")
+    # Get admin password from secrets if available
+    ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
+    # Get Slack webhook URL if available
+    SLACK_WEBHOOK_URL = st.secrets.get("SLACK_WEBHOOK_URL", "")
+else:
+    # Fallback for local development without secrets
+    try:
+        import config
+        EMAIL_SENDER = config.EMAIL_SENDER
+        EMAIL_SENDER_NAME = getattr(config, "EMAIL_SENDER_NAME", "Project Upload")
+        # For Brevo SMTP configuration
+        BREVO_SMTP_SERVER = getattr(config, "BREVO_SMTP_SERVER", "smtp-relay.brevo.com")
+        BREVO_SMTP_PORT = getattr(config, "BREVO_SMTP_PORT", 587)
+        BREVO_SMTP_LOGIN = getattr(config, "BREVO_SMTP_LOGIN", "919624001@smtp-brevo.com")
+        BREVO_SMTP_PASSWORD = getattr(config, "BREVO_SMTP_PASSWORD", "JVgNcDARtEBXyKYG")
+        # Get admin password from config if available, otherwise use default
+        ADMIN_PASSWORD = getattr(config, "ADMIN_PASSWORD", "admin123")
+        # Get Slack webhook URL if available
+        SLACK_WEBHOOK_URL = getattr(config, "SLACK_WEBHOOK_URL", "")
+    except ImportError:
+        st.error("No configuration found. Please set up secrets or create a config.py file.")
+        st.stop()
 
 # Create upload folder if it doesn't exist
 if not os.path.exists(UPLOAD_FOLDER):
@@ -779,6 +823,15 @@ def init_csv_files():
         log_df = pd.DataFrame(columns=['timestamp', 'action', 'project_id', 'details'])
         log_df.to_csv(CHANGE_LOG_FILE, index=False)
         git_commit_and_push(CHANGE_LOG_FILE, "Created change log CSV file")
+
+# Other configuration
+UPLOAD_FOLDER = "uploads"
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+EXCEL_FILE = "project_email.xlsx"
+
+# Create uploads directory if it doesn't exist
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
 def main():
     st.title("Project Image Upload System")
