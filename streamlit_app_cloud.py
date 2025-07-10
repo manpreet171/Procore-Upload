@@ -419,15 +419,26 @@ if not os.path.exists(UPLOAD_FOLDER):
 def send_email(recipient_email, subject, body, file_paths):
     """Send email with attachments using Brevo SMTP"""
     try:
+        # Debug: Show email parameters
+        st.sidebar.write("### Email Debug Info")
+        st.sidebar.write(f"Recipient: {recipient_email}")
+        st.sidebar.write(f"Subject: {subject}")
+        st.sidebar.write(f"SMTP Server: {BREVO_SMTP_SERVER}")
+        st.sidebar.write(f"SMTP Port: {BREVO_SMTP_PORT}")
+        st.sidebar.write(f"SMTP Login: {BREVO_SMTP_LOGIN[:5]}...") # Show only first 5 chars for security
+        
         # Check if files exist and are readable
         valid_files = []
         for file_path in file_paths:
             if os.path.exists(file_path) and os.access(file_path, os.R_OK):
                 valid_files.append(file_path)
+                st.sidebar.write(f" File valid: {os.path.basename(file_path)}")
             else:
+                st.sidebar.error(f" File not accessible: {file_path}")
                 st.error(f" File not accessible: {file_path}")
         
         if not valid_files:
+            st.sidebar.error("No valid files to attach!")
             st.error("No valid files to attach!")
             return False
         
@@ -451,44 +462,62 @@ def send_email(recipient_email, subject, body, file_paths):
                     attachment = MIMEApplication(file_content, _subtype=file_path.split('.')[-1])
                     attachment.add_header('Content-Disposition', f'attachment; filename="{file_name}"')
                     msg.attach(attachment)
+                    st.sidebar.write(f" Attached: {file_name} ({len(file_content)/1024:.1f} KB)")
             except Exception as e:
+                st.sidebar.error(f" Error attaching file {file_path}: {str(e)}")
                 st.error(f" Error attaching file {file_path}: {str(e)}")
                 return False
         
         # Check if email size is too large (Brevo limit is 10MB)
+        st.sidebar.write(f" Total email size: {total_size/1024/1024:.2f} MB")
         if total_size > 10 * 1024 * 1024:
+            st.sidebar.error(" Email size exceeds Brevo's 10MB limit!")
             st.error(" Email size exceeds Brevo's 10MB limit!")
             return False
         
         # Connect to server and send email
         try:
+            st.sidebar.write(" Connecting to SMTP server...")
             server = smtplib.SMTP(BREVO_SMTP_SERVER, BREVO_SMTP_PORT)
+            st.sidebar.write(" Starting EHLO...")
             server.ehlo()
+            st.sidebar.write(" Starting TLS...")
             server.starttls()
+            st.sidebar.write(" Logging in...")
             server.login(BREVO_SMTP_LOGIN, BREVO_SMTP_PASSWORD)
             
             text = msg.as_string()
             
             # Send the email
+            st.sidebar.write(" Sending email...")
             send_result = server.sendmail(EMAIL_SENDER, [recipient_email], text)
             
             # Check if there were any failed recipients
             if send_result:
+                st.sidebar.error(f" Failed to deliver to some recipients: {send_result}")
                 st.error(" Failed to deliver to some recipients")
                 server.quit()
                 return False
                 
             server.quit()
+            st.sidebar.success(" Email sent successfully!")
             return True
             
-        except smtplib.SMTPAuthenticationError:
+        except smtplib.SMTPAuthenticationError as e:
+            st.sidebar.error(f" Authentication failed: {str(e)}")
             st.error(" Authentication failed! Please check your SMTP login and password.")
             return False
         except smtplib.SMTPException as e:
+            st.sidebar.error(f" SMTP error: {str(e)}")
             st.error(f" SMTP error: {str(e)}")
+            return False
+        except Exception as e:
+            st.sidebar.error(f" Unexpected error during SMTP: {str(e)}")
+            st.error(f" Error during email sending: {str(e)}")
             return False
             
     except Exception as e:
+        st.sidebar.error(f" General error: {str(e)}")
         st.error(f" Error sending email: {str(e)}")
         return False
 
