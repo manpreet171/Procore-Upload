@@ -1,61 +1,309 @@
-import streamlit as st
 import os
+import streamlit as st
 import pandas as pd
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
-import shutil
-import uuid
-import hashlib
-import requests
-import json
 import time
-import sqlite3
 import io
+import git
+import datetime
 
-# Set page configuration
-st.set_page_config(
-    page_title="Project Image Upload",
-    page_icon="📷",
-    layout="centered"
-)
+# File paths
+UPLOAD_FOLDER = "uploads"
+CSV_FILE = "Procore Project Email List.csv"
+CHANGE_LOG_FILE = "change_log.csv"
 
-# Configuration - use secrets if available, otherwise use defaults
-# For local development, you can use .streamlit/secrets.toml
-# For Streamlit Cloud, set these in the Streamlit Cloud dashboard
-if 'EMAIL_SENDER' in st.secrets:
-    EMAIL_SENDER = st.secrets["EMAIL_SENDER"]
-    EMAIL_SENDER_NAME = st.secrets.get("EMAIL_SENDER_NAME", "Project Upload")
-    # For Brevo SMTP configuration
-    BREVO_SMTP_SERVER = st.secrets.get("BREVO_SMTP_SERVER", "smtp-relay.brevo.com")
-    BREVO_SMTP_PORT = st.secrets.get("BREVO_SMTP_PORT", 587)
-    BREVO_SMTP_LOGIN = st.secrets.get("BREVO_SMTP_LOGIN", "919624001@smtp-brevo.com")
-    BREVO_SMTP_PASSWORD = st.secrets.get("BREVO_SMTP_PASSWORD", "JVgNcDARtEBXyKYG")
-    # Get admin password from secrets if available
-    ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
-    # Get Slack webhook URL if available
-    SLACK_WEBHOOK_URL = st.secrets.get("SLACK_WEBHOOK_URL", "")
-    DB_FILE = st.secrets.get("DB_FILE", "projects.db")
-else:
-    # Fallback for local development without secrets
+# Create upload folder if it doesn't exist
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+# Git operations
+def git_pull():
+    """Pull latest changes from GitHub repository"""
     try:
-        import config
-        EMAIL_SENDER = config.EMAIL_SENDER
-        EMAIL_SENDER_NAME = getattr(config, "EMAIL_SENDER_NAME", "Project Upload")
-        # For Brevo SMTP configuration
-        BREVO_SMTP_SERVER = getattr(config, "BREVO_SMTP_SERVER", "smtp-relay.brevo.com")
-        BREVO_SMTP_PORT = getattr(config, "BREVO_SMTP_PORT", 587)
-        BREVO_SMTP_LOGIN = getattr(config, "BREVO_SMTP_LOGIN", "919624001@smtp-brevo.com")
-        BREVO_SMTP_PASSWORD = getattr(config, "BREVO_SMTP_PASSWORD", "JVgNcDARtEBXyKYG")
-        # Get admin password from config if available, otherwise use default
-        ADMIN_PASSWORD = getattr(config, "ADMIN_PASSWORD", "admin123")
-        # Get Slack webhook URL if available
-        SLACK_WEBHOOK_URL = getattr(config, "SLACK_WEBHOOK_URL", "")
-        DB_FILE = getattr(config, "DB_FILE", "projects.db")
-    except ImportError:
-        st.error("No configuration found. Please set up secrets or create a config.py file.")
-        st.stop()
+        repo = git.Repo('.')
+        repo.git.pull()
+        return True, "Successfully pulled latest changes"
+    except Exception as e:
+        return False, f"Error pulling from GitHub: {e}"
+
+def git_commit_and_push(file_path, commit_message):
+    """Commit and push changes to GitHub repository"""
+    try:
+        repo = git.Repo('.')
+        repo.git.add(file_path)
+        repo.git.commit('-m', commit_message)
+        repo.git.push()
+        return True, "Successfully pushed changes to GitHub"
+    except Exception as e:
+        return False, f"Error pushing to GitHub: {e}"
+
+# CSV operations
+def get_projects_from_csv():
+    """Get all projects from CSV file"""
+    try:
+        # Pull latest changes from GitHub
+        git_pull()
+        
+        # Check if file exists, if not create it
+        if not os.path.exists(CSV_FILE):
+            df = pd.DataFrame(columns=['Project ID', 'Email ID link'])
+            df.to_csv(CSV_FILE, index=False)
+            git_commit_and_push(CSV_FILE, "Created projects CSV file")
+        
+        # Read CSV file
+        df = pd.read_csv(CSV_FILE)
+        return df
+    except Exception as e:
+        st.error(f"Error reading CSV file: {e}")
+        return pd.DataFrame(columns=['Project ID', 'Email ID link'])
+
+def get_email_for_project(project_id):
+    """Get email for a specific project ID"""
+    try:
+        df = get_projects_from_csv()
+        # Convert project_id to string for comparison
+        project_id_str = str(project_id).strip()
+        
+        # Find the row with matching project ID
+        matching_row = df[df['Project ID'].astype(str).str.strip() == project_id_str]
+        
+        if not matching_row.empty:
+            return matching_row['Email ID link'].iloc[0]
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Error getting email for project: {e}")
+        return None
+
+def add_project_to_csv(project_id, email):
+    """Add a new project to CSV file"""
+    try:
+        # Get current projects
+        df = get_projects_from_csv()
+        
+        # Check if project ID already exists
+        if str(project_id) in df['Project ID'].astype(str).values:
+            return False, "Project ID already exists"
+        
+        # Add new project
+        new_row = pd.DataFrame({'Project ID': [project_id], 'Email ID link': [email]})
+        df = pd.concat([df, new_row], ignore_index=True)
+        
+        # Save to CSV
+        df.to_csv(CSV_FILE, index=False)
+        
+        # Log the change
+        log_change("add", project_id, f"Added new project with email: {email}")
+        
+        # Commit and push changes
+        success, message = git_commit_and_push(CSV_FILE, f"Added project {project_id}")
+        if not success:
+            return False, message
+        
+        return True, "Project added successfully"
+    except Exception as e:
+        return False, f"Error adding project: {e}"
+
+def edit_project_in_csv(old_project_id, new_project_id, new_email):
+    """Edit an existing project in CSV file"""
+    try:
+        # Get current projects
+        df = get_projects_from_csv()
+        
+        # Check if project exists
+        mask = df['Project ID'].astype(str) == str(old_project_id)
+        if not mask.any():
+            return False, f"Project ID {old_project_id} not found"
+        
+        # Check if new project ID already exists (if different from old one)
+        if str(old_project_id) != str(new_project_id):
+            if str(new_project_id) in df['Project ID'].astype(str).values:
+                return False, f"Project ID {new_project_id} already exists"
+        
+        # Update project
+        df.loc[mask, 'Project ID'] = new_project_id
+        df.loc[mask, 'Email ID link'] = new_email
+        
+        # Save to CSV
+        df.to_csv(CSV_FILE, index=False)
+        
+        # Log the change
+        log_change("edit", old_project_id, f"Changed to Project ID: {new_project_id}, Email: {new_email}")
+        
+        # Commit and push changes
+        success, message = git_commit_and_push(CSV_FILE, f"Edited project {old_project_id} to {new_project_id}")
+        if not success:
+            return False, message
+        
+        return True, "Project updated successfully"
+    except Exception as e:
+        return False, f"Error updating project: {e}"
+
+def delete_project_from_csv(project_id):
+    """Delete a project from CSV file"""
+    try:
+        # Get current projects
+        df = get_projects_from_csv()
+        
+        # Check if project exists
+        mask = df['Project ID'].astype(str) == str(project_id)
+        if not mask.any():
+            return False, f"Project ID {project_id} not found"
+        
+        # Get email before deleting (for logging)
+        email = df.loc[mask, 'Email ID link'].iloc[0]
+        
+        # Delete project
+        df = df[~mask]
+        
+        # Save to CSV
+        df.to_csv(CSV_FILE, index=False)
+        
+        # Log the change
+        log_change("delete", project_id, f"Deleted project with email: {email}")
+        
+        # Commit and push changes
+        success, message = git_commit_and_push(CSV_FILE, f"Deleted project {project_id}")
+        if not success:
+            return False, message
+        
+        return True, "Project deleted successfully"
+    except Exception as e:
+        return False, f"Error deleting project: {e}"
+
+def bulk_import_projects(file):
+    """Import multiple projects from Excel or CSV file"""
+    try:
+        # Read uploaded file
+        if file.name.endswith('.csv'):
+            import_df = pd.read_csv(file)
+        elif file.name.endswith(('.xlsx', '.xls')):
+            import_df = pd.read_excel(file)
+        else:
+            return False, "Unsupported file format. Please upload a CSV or Excel file."
+        
+        # Check required columns
+        required_columns = ['Project ID', 'Email ID link']
+        if not all(col in import_df.columns for col in required_columns):
+            return False, f"File must contain columns: {', '.join(required_columns)}"
+        
+        # Get current projects
+        df = get_projects_from_csv()
+        
+        # Track import results
+        added_count = 0
+        skipped_count = 0
+        errors = []
+        
+        # Process each row
+        for _, row in import_df.iterrows():
+            project_id = row['Project ID']
+            email = row['Email ID link']
+            
+            # Skip empty rows
+            if pd.isna(project_id) or pd.isna(email) or str(project_id).strip() == '' or str(email).strip() == '':
+                skipped_count += 1
+                continue
+            
+            # Check if project ID already exists
+            if str(project_id) in df['Project ID'].astype(str).values:
+                skipped_count += 1
+                continue
+            
+            # Add new project
+            new_row = pd.DataFrame({'Project ID': [project_id], 'Email ID link': [email]})
+            df = pd.concat([df, new_row], ignore_index=True)
+            added_count += 1
+        
+        # Save to CSV if any projects were added
+        if added_count > 0:
+            df.to_csv(CSV_FILE, index=False)
+            
+            # Log the change
+            log_change("bulk_import", "", f"Bulk imported {added_count} projects")
+            
+            # Commit and push changes
+            success, message = git_commit_and_push(CSV_FILE, f"Bulk imported {added_count} projects")
+            if not success:
+                return False, message
+        
+        # Return results
+        result_message = f"Import complete. Added: {added_count}, Skipped: {skipped_count}"
+        if errors:
+            result_message += f", Errors: {len(errors)}"
+        
+        return True, result_message
+    except Exception as e:
+        return False, f"Error importing projects: {e}"
+
+def log_change(action, project_id, details):
+    """Log a change to the change log CSV file"""
+    try:
+        # Create change log file if it doesn't exist
+        if not os.path.exists(CHANGE_LOG_FILE):
+            log_df = pd.DataFrame(columns=['timestamp', 'action', 'project_id', 'details'])
+            log_df.to_csv(CHANGE_LOG_FILE, index=False)
+        else:
+            log_df = pd.read_csv(CHANGE_LOG_FILE)
+        
+        # Add new log entry
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        new_log = pd.DataFrame({
+            'timestamp': [timestamp],
+            'action': [action],
+            'project_id': [project_id],
+            'details': [details]
+        })
+        
+        log_df = pd.concat([new_log, log_df], ignore_index=True)
+        
+        # Save to CSV
+        log_df.to_csv(CHANGE_LOG_FILE, index=False)
+        
+        # Commit and push changes
+        git_commit_and_push(CHANGE_LOG_FILE, f"Logged {action} for project {project_id}")
+        
+        return True
+    except Exception as e:
+        st.error(f"Error logging change: {e}")
+        return False
+
+def get_change_history():
+    """Get change history from change log CSV file"""
+    try:
+        # Pull latest changes from GitHub
+        git_pull()
+        
+        # Check if file exists
+        if not os.path.exists(CHANGE_LOG_FILE):
+            return pd.DataFrame(columns=['timestamp', 'action', 'project_id', 'details'])
+        
+        # Read CSV file
+        df = pd.read_csv(CHANGE_LOG_FILE)
+        return df
+    except Exception as e:
+        st.error(f"Error getting change history: {e}")
+        return pd.DataFrame(columns=['timestamp', 'action', 'project_id', 'details'])
+
+def init_csv_files():
+    """Initialize CSV files if they don't exist"""
+    # Pull latest changes from GitHub
+    git_pull()
+    
+    # Create projects CSV file if it doesn't exist
+    if not os.path.exists(CSV_FILE):
+        df = pd.DataFrame(columns=['Project ID', 'Email ID link'])
+        df.to_csv(CSV_FILE, index=False)
+        git_commit_and_push(CSV_FILE, "Created projects CSV file")
+    
+    # Create change log CSV file if it doesn't exist
+    if not os.path.exists(CHANGE_LOG_FILE):
+        log_df = pd.DataFrame(columns=['timestamp', 'action', 'project_id', 'details'])
+        log_df.to_csv(CHANGE_LOG_FILE, index=False)
+        git_commit_and_push(CHANGE_LOG_FILE, "Created change log CSV file")
 
 # Other configuration
 UPLOAD_FOLDER = "uploads"
@@ -66,19 +314,6 @@ EXCEL_FILE = "project_email.xlsx"
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
-def get_email_for_project(project_id):
-    """Get email address for a project ID from SQLite"""
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        df = pd.read_sql_query("SELECT email FROM projects WHERE project_id = ?", conn, params=(project_id,))
-        conn.close()
-        if not df.empty:
-            return df.iloc[0]['email']
-        return None
-    except Exception as e:
-        st.error(f"Error reading SQLite database: {e}")
-        return None
-
 def send_email(recipient_email, subject, body, file_paths):
     """Send email with attachments using Brevo SMTP"""
     try:
@@ -88,7 +323,7 @@ def send_email(recipient_email, subject, body, file_paths):
             if os.path.exists(file_path) and os.access(file_path, os.R_OK):
                 valid_files.append(file_path)
             else:
-                st.error(f"❌ File not accessible: {file_path}")
+                st.error(f" File not accessible: {file_path}")
         
         if not valid_files:
             st.error("No valid files to attach!")
@@ -96,7 +331,7 @@ def send_email(recipient_email, subject, body, file_paths):
         
         # Create message
         msg = MIMEMultipart()
-        msg['From'] = f"{EMAIL_SENDER_NAME} <{EMAIL_SENDER}>"
+        msg['From'] = f"{EMAIL_SENDER_NAME} {EMAIL_SENDER}"
         msg['To'] = recipient_email
         msg['Subject'] = subject
         
@@ -115,12 +350,12 @@ def send_email(recipient_email, subject, body, file_paths):
                     attachment.add_header('Content-Disposition', f'attachment; filename="{file_name}"')
                     msg.attach(attachment)
             except Exception as e:
-                st.error(f"❌ Error attaching file {file_path}: {str(e)}")
+                st.error(f" Error attaching file {file_path}: {str(e)}")
                 return False
         
         # Check if email size is too large (Brevo limit is 10MB)
         if total_size > 10 * 1024 * 1024:
-            st.error("❌ Email size exceeds Brevo's 10MB limit!")
+            st.error(" Email size exceeds Brevo's 10MB limit!")
             return False
         
         # Connect to server and send email
@@ -137,7 +372,7 @@ def send_email(recipient_email, subject, body, file_paths):
             
             # Check if there were any failed recipients
             if send_result:
-                st.error("❌ Failed to deliver to some recipients")
+                st.error(" Failed to deliver to some recipients")
                 server.quit()
                 return False
                 
@@ -145,98 +380,15 @@ def send_email(recipient_email, subject, body, file_paths):
             return True
             
         except smtplib.SMTPAuthenticationError:
-            st.error("❌ Authentication failed! Please check your SMTP login and password.")
+            st.error(" Authentication failed! Please check your SMTP login and password.")
             return False
         except smtplib.SMTPException as e:
-            st.error(f"❌ SMTP error: {str(e)}")
+            st.error(f" SMTP error: {str(e)}")
             return False
             
     except Exception as e:
-        st.error(f"❌ Error sending email: {str(e)}")
+        st.error(f" Error sending email: {str(e)}")
         return False
-
-def add_project_to_sqlite(project_id, email):
-    """Add a new project ID and email to the SQLite database"""
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        
-        # Create table if it doesn't exist
-        c.execute('''CREATE TABLE IF NOT EXISTS projects
-                     (project_id text, email text)''')
-        
-        # Check if project ID already exists
-        c.execute("SELECT * FROM projects WHERE project_id = ?", (project_id,))
-        if c.fetchone():
-            return False, "Project ID already exists"
-        
-        # Add new row
-        c.execute("INSERT INTO projects VALUES (?, ?)", (project_id, email))
-        conn.commit()
-        conn.close()
-        return True, "Project added successfully"
-    except Exception as e:
-        return False, f"Error adding project: {e}"
-
-def edit_project_in_sqlite(old_project_id, new_project_id, new_email):
-    """Edit an existing project ID and email in the SQLite database"""
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        
-        # Check if the project exists
-        c.execute("SELECT * FROM projects WHERE project_id = ?", (old_project_id,))
-        if not c.fetchone():
-            conn.close()
-            return False, f"Project ID {old_project_id} not found"
-        
-        # Check if the new project ID already exists (if it's different from the old one)
-        if old_project_id != new_project_id:
-            c.execute("SELECT * FROM projects WHERE project_id = ?", (new_project_id,))
-            if c.fetchone():
-                conn.close()
-                return False, f"Project ID {new_project_id} already exists"
-        
-        # Update the project
-        c.execute("UPDATE projects SET project_id = ?, email = ? WHERE project_id = ?", 
-                 (new_project_id, new_email, old_project_id))
-        
-        # Log the change
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        c.execute('''CREATE TABLE IF NOT EXISTS change_log
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, action TEXT, project_id TEXT, details TEXT)''')
-        c.execute("INSERT INTO change_log (timestamp, action, project_id, details) VALUES (?, ?, ?, ?)",
-                 (timestamp, "edit", old_project_id, f"Changed to Project ID: {new_project_id}, Email: {new_email}"))
-        
-        conn.commit()
-        conn.close()
-        return True, "Project updated successfully"
-    except Exception as e:
-        return False, f"Error updating project: {e}"
-
-def delete_project_from_sqlite(project_id):
-    """Delete a project from the SQLite database"""
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        
-        # Find the row with the project ID
-        c.execute("SELECT * FROM projects WHERE project_id = ?", (project_id,))
-        if not c.fetchone():
-            return False, f"Project ID {project_id} not found"
-        
-        # Remove the row
-        c.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
-        conn.commit()
-        conn.close()
-        return True, "Project deleted successfully"
-    except Exception as e:
-        return False, f"Error deleting project: {e}"
-
-def verify_password(password):
-    """Verify if the provided password matches the admin password"""
-    # In a production environment, use a more secure password hashing method
-    return password == ADMIN_PASSWORD
 
 def upload_images_tab():
     # Initialize session state for form reset
@@ -290,14 +442,14 @@ def upload_images_tab():
                     if SLACK_WEBHOOK_URL:
                         try:
                             slack_message = {
-                                "text": f"✅ New images uploaded for Project ID: {project_id}"
+                                "text": f" New images uploaded for Project ID: {project_id}"
                             }
                             requests.post(SLACK_WEBHOOK_URL, json=slack_message)
                         except Exception as e:
                             st.warning(f"Could not send Slack notification: {str(e)}")
                     
                     # Show success message without revealing email
-                    st.success("✅ Images sent successfully!")
+                    st.success(" Images sent successfully!")
                     
                     # Clean up the temporary files
                     try:
@@ -336,14 +488,6 @@ def bulk_import_projects(uploaded_file):
         if not all(col in df.columns for col in required_columns):
             return False, f"File must contain these columns: {', '.join(required_columns)}"
         
-        # Connect to database
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        
-        # Create table if it doesn't exist
-        c.execute('''CREATE TABLE IF NOT EXISTS projects
-                     (project_id text UNIQUE, email text)''')
-        
         # Track import stats
         added = 0
         skipped = 0
@@ -361,28 +505,18 @@ def bulk_import_projects(uploaded_file):
                     continue
                 
                 # Check if project ID already exists
-                c.execute("SELECT 1 FROM projects WHERE project_id = ?", (project_id,))
-                if c.fetchone():
+                if str(project_id) in get_projects_from_csv()['Project ID'].astype(str).values:
                     skipped += 1
                     continue
                 
                 # Add new project
-                c.execute("INSERT INTO projects VALUES (?, ?)", (project_id, email))
-                added += 1
-                
+                success, message = add_project_to_csv(project_id, email)
+                if success:
+                    added += 1
+                else:
+                    errors.append(message)
             except Exception as e:
                 errors.append(f"Row {_ + 2}: {str(e)}")
-        
-        # Log the bulk import
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        c.execute('''CREATE TABLE IF NOT EXISTS change_log
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, action TEXT, project_id TEXT, details TEXT)''')
-        c.execute("INSERT INTO change_log (timestamp, action, project_id, details) VALUES (?, ?, ?, ?)",
-                 (timestamp, "bulk_import", "multiple", f"Added {added}, skipped {skipped} projects"))
-        
-        # Commit changes and close connection
-        conn.commit()
-        conn.close()
         
         # Prepare result message
         result_message = f"Successfully added {added} projects, skipped {skipped} duplicates."
@@ -435,7 +569,7 @@ def manage_projects_tab():
         
         if st.button("Add Project"):
             if new_project_id and new_email:
-                success, message = add_project_to_sqlite(new_project_id, new_email)
+                success, message = add_project_to_csv(new_project_id, new_email)
                 if success:
                     st.success(message)
                 else:
@@ -447,10 +581,8 @@ def manage_projects_tab():
         st.subheader("Edit or Delete Project")
         
         try:
-            # Get projects from SQLite
-            conn = sqlite3.connect(DB_FILE)
-            df = pd.read_sql_query("SELECT project_id as 'Project ID', email as 'Email ID link' FROM projects", conn)
-            conn.close()
+            # Get projects from CSV
+            df = get_projects_from_csv()
             
             if not df.empty:
                 # Project selection for edit/delete
@@ -474,7 +606,7 @@ def manage_projects_tab():
                     # Delete mode
                     with col2:
                         if st.button("Delete Selected Project"):
-                            success, message = delete_project_from_sqlite(selected_project)
+                            success, message = delete_project_from_csv(selected_project)
                             if success:
                                 st.success(message)
                                 st.rerun()
@@ -493,7 +625,7 @@ def manage_projects_tab():
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button("Save Changes"):
-                            success, message = edit_project_in_sqlite(st.session_state.edit_project_id, edited_project_id, edited_email)
+                            success, message = edit_project_in_csv(st.session_state.edit_project_id, edited_project_id, edited_email)
                             if success:
                                 st.success(message)
                                 st.session_state.edit_mode = False
@@ -578,10 +710,8 @@ def manage_projects_tab():
         st.subheader("View All Projects")
         
         try:
-            # Get projects from SQLite
-            conn = sqlite3.connect(DB_FILE)
-            df = pd.read_sql_query("SELECT project_id as 'Project ID', email as 'Email ID link' FROM projects", conn)
-            conn.close()
+            # Get projects from CSV
+            df = get_projects_from_csv()
             
             if not df.empty:
                 # Display the dataframe
@@ -618,15 +748,9 @@ def manage_projects_tab():
                 st.subheader("Change History")
                 if st.button("Show Change History"):
                     try:
-                        conn = sqlite3.connect(DB_FILE)
-                        history_df = pd.read_sql_query(
-                            "SELECT timestamp, action, project_id, details FROM change_log ORDER BY timestamp DESC LIMIT 100", 
-                            conn
-                        )
-                        conn.close()
-                        
-                        if not history_df.empty:
-                            st.dataframe(history_df)
+                        df = get_change_history()
+                        if not df.empty:
+                            st.dataframe(df)
                         else:
                             st.info("No change history found")
                     except Exception as e:
@@ -639,27 +763,28 @@ def manage_projects_tab():
             else:
                 st.error(f"Error reading database: {e}")
 
-def init_database():
-    """Initialize the SQLite database and create tables if they don't exist"""
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
+def init_csv_files():
+    """Initialize CSV files if they don't exist"""
+    # Pull latest changes from GitHub
+    git_pull()
     
-    # Create projects table if it doesn't exist
-    c.execute('''CREATE TABLE IF NOT EXISTS projects
-                 (project_id text UNIQUE, email text)''')
+    # Create projects CSV file if it doesn't exist
+    if not os.path.exists(CSV_FILE):
+        df = pd.DataFrame(columns=['Project ID', 'Email ID link'])
+        df.to_csv(CSV_FILE, index=False)
+        git_commit_and_push(CSV_FILE, "Created projects CSV file")
     
-    # Create change_log table if it doesn't exist
-    c.execute('''CREATE TABLE IF NOT EXISTS change_log
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, action TEXT, project_id TEXT, details TEXT)''')
-    
-    conn.commit()
-    conn.close()
+    # Create change log CSV file if it doesn't exist
+    if not os.path.exists(CHANGE_LOG_FILE):
+        log_df = pd.DataFrame(columns=['timestamp', 'action', 'project_id', 'details'])
+        log_df.to_csv(CHANGE_LOG_FILE, index=False)
+        git_commit_and_push(CHANGE_LOG_FILE, "Created change log CSV file")
 
 def main():
     st.title("Project Image Upload System")
     
-    # Initialize database
-    init_database()
+    # Initialize CSV files
+    init_csv_files()
     
     # Create tabs
     tab1, tab2 = st.tabs(["Upload Images", "Manage Projects"])
