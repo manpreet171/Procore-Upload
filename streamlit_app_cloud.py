@@ -561,11 +561,15 @@ def upload_images_tab():
     if 'form_submitted' not in st.session_state:
         st.session_state.form_submitted = False
     
-    # Create unique keys for form elements that will be reset
-    form_key_prefix = "upload_form_" + str(int(time.time()))
-    project_id_key = f"{form_key_prefix}_project_id"
-    status_key = f"{form_key_prefix}_status"
-    file_uploader_key = f"{form_key_prefix}_files"
+    # Only generate new form keys when the form is submitted successfully
+    # or when the app first loads and keys don't exist
+    if 'form_key_prefix' not in st.session_state or st.session_state.form_submitted:
+        st.session_state.form_key_prefix = f"upload_form_{int(time.time())}"
+    
+    # Use the stored keys
+    project_id_key = f"{st.session_state.form_key_prefix}_project_id"
+    status_key = f"{st.session_state.form_key_prefix}_status"
+    file_uploader_key = f"{st.session_state.form_key_prefix}_files"
     
     # Check if we need to reset the form
     if st.session_state.form_submitted:
