@@ -25,39 +25,26 @@ UPLOAD_FOLDER = "uploads"
 CSV_FILE = "Procore Project Email List.csv"
 CHANGE_LOG_FILE = "change_log.csv"
 
-# Configuration - use secrets if available, otherwise use defaults
-# For local development, you can use .streamlit/secrets.toml
-# For Streamlit Cloud, set these in the Streamlit Cloud dashboard
+# Default configuration
+EMAIL_SENDER = "noreply@example.com"
+EMAIL_SENDER_NAME = "Project Upload"
+BREVO_SMTP_SERVER = "smtp-relay.brevo.com"
+BREVO_SMTP_PORT = 587
+BREVO_SMTP_LOGIN = "your-smtp-login"
+BREVO_SMTP_PASSWORD = "your-smtp-password"
+ADMIN_PASSWORD = "admin123"
+SLACK_WEBHOOK_URL = ""
+
+# Override with secrets if available
 if 'EMAIL_SENDER' in st.secrets:
     EMAIL_SENDER = st.secrets["EMAIL_SENDER"]
-    EMAIL_SENDER_NAME = st.secrets.get("EMAIL_SENDER_NAME", "Project Upload")
-    # For Brevo SMTP configuration
-    BREVO_SMTP_SERVER = st.secrets.get("BREVO_SMTP_SERVER", "smtp-relay.brevo.com")
-    BREVO_SMTP_PORT = st.secrets.get("BREVO_SMTP_PORT", 587)
-    BREVO_SMTP_LOGIN = st.secrets.get("BREVO_SMTP_LOGIN", "919624001@smtp-brevo.com")
-    BREVO_SMTP_PASSWORD = st.secrets.get("BREVO_SMTP_PASSWORD", "JVgNcDARtEBXyKYG")
-    # Get admin password from secrets if available
-    ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
-    # Get Slack webhook URL if available
-    SLACK_WEBHOOK_URL = st.secrets.get("SLACK_WEBHOOK_URL", "")
-else:
-    # Fallback for local development without secrets
-    try:
-        import config
-        EMAIL_SENDER = config.EMAIL_SENDER
-        EMAIL_SENDER_NAME = getattr(config, "EMAIL_SENDER_NAME", "Project Upload")
-        # For Brevo SMTP configuration
-        BREVO_SMTP_SERVER = getattr(config, "BREVO_SMTP_SERVER", "smtp-relay.brevo.com")
-        BREVO_SMTP_PORT = getattr(config, "BREVO_SMTP_PORT", 587)
-        BREVO_SMTP_LOGIN = getattr(config, "BREVO_SMTP_LOGIN", "919624001@smtp-brevo.com")
-        BREVO_SMTP_PASSWORD = getattr(config, "BREVO_SMTP_PASSWORD", "JVgNcDARtEBXyKYG")
-        # Get admin password from config if available, otherwise use default
-        ADMIN_PASSWORD = getattr(config, "ADMIN_PASSWORD", "admin123")
-        # Get Slack webhook URL if available
-        SLACK_WEBHOOK_URL = getattr(config, "SLACK_WEBHOOK_URL", "")
-    except ImportError:
-        st.error("No configuration found. Please set up secrets or create a config.py file.")
-        st.stop()
+    EMAIL_SENDER_NAME = st.secrets.get("EMAIL_SENDER_NAME", EMAIL_SENDER_NAME)
+    BREVO_SMTP_SERVER = st.secrets.get("BREVO_SMTP_SERVER", BREVO_SMTP_SERVER)
+    BREVO_SMTP_PORT = st.secrets.get("BREVO_SMTP_PORT", BREVO_SMTP_PORT)
+    BREVO_SMTP_LOGIN = st.secrets.get("BREVO_SMTP_LOGIN", BREVO_SMTP_LOGIN)
+    BREVO_SMTP_PASSWORD = st.secrets.get("BREVO_SMTP_PASSWORD", BREVO_SMTP_PASSWORD)
+    ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", ADMIN_PASSWORD)
+    SLACK_WEBHOOK_URL = st.secrets.get("SLACK_WEBHOOK_URL", SLACK_WEBHOOK_URL)
 
 # Create upload folder if it doesn't exist
 if not os.path.exists(UPLOAD_FOLDER):
@@ -433,6 +420,10 @@ def send_email(recipient_email, subject, body, file_paths):
     except Exception as e:
         st.error(f" Error sending email: {str(e)}")
         return False
+
+def verify_password(password):
+    """Verify if the provided password matches the admin password"""
+    return password == ADMIN_PASSWORD
 
 def upload_images_tab():
     # Initialize session state for form reset
