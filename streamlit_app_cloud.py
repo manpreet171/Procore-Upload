@@ -27,17 +27,15 @@ UPLOAD_FOLDER = "uploads"
 CSV_FILE = "Procore Project Email List.csv"
 CHANGE_LOG_FILE = "change_log.csv"
 
-'''
 # Default configuration - KEPT FOR REFERENCE ONLY (NOT USED)
-EMAIL_SENDER = "manpreet@sdgny.com"
-EMAIL_SENDER_NAME = "Project Upload"
-BREVO_SMTP_SERVER = "smtp-relay.brevo.com"
-BREVO_SMTP_PORT = 587
-BREVO_SMTP_LOGIN = "919624001@smtp-brevo.com"
-BREVO_SMTP_PASSWORD = "JVgNcDARtEBXyKYG"
-ADMIN_PASSWORD = "admin123"
-SLACK_WEBHOOK_URL = ""
-'''
+# EMAIL_SENDER = "manpreet@sdgny.com"
+# EMAIL_SENDER_NAME = "Project Upload"
+# BREVO_SMTP_SERVER = "smtp-relay.brevo.com"
+# BREVO_SMTP_PORT = 587
+# BREVO_SMTP_LOGIN = "919624001@smtp-brevo.com"
+# BREVO_SMTP_PASSWORD = "JVgNcDARtEBXyKYG"
+# ADMIN_PASSWORD = "admin123"
+# SLACK_WEBHOOK_URL = ""
 
 # Initialize with empty defaults
 EMAIL_SENDER = ""
