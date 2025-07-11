@@ -26,7 +26,7 @@ st.set_page_config(
 UPLOAD_FOLDER = "uploads"
 CSV_FILE = "Procore Project Email List.csv"
 CHANGE_LOG_FILE = "change_log.csv"
-
+'''
 # Default configuration
 EMAIL_SENDER = "manpreet@sdgny.com"
 EMAIL_SENDER_NAME = "Project Upload"
@@ -36,7 +36,7 @@ BREVO_SMTP_LOGIN = "919624001@smtp-brevo.com"
 BREVO_SMTP_PASSWORD = "JVgNcDARtEBXyKYG"
 ADMIN_PASSWORD = "admin123"
 SLACK_WEBHOOK_URL = ""
-
+'''''
 # Override with secrets if available
 if 'EMAIL_SENDER' in st.secrets:
     EMAIL_SENDER = st.secrets["EMAIL_SENDER"]
