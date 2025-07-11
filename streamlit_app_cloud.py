@@ -29,7 +29,7 @@ with col1:
     # Load image with PIL and resize with high quality
     img = Image.open("logo.jpg")
     # Resize with high quality resampling
-    new_width = 100
+    new_width = 120
     width_percent = (new_width / float(img.size[0]))
     new_height = int((float(img.size[1]) * float(width_percent)))
     img = img.resize((new_width, new_height), Image.LANCZOS)
