@@ -14,6 +14,7 @@ import shutil
 import uuid
 import tempfile
 import subprocess
+from PIL import Image
 
 # Set page configuration
 st.set_page_config(
@@ -25,7 +26,9 @@ st.set_page_config(
 # Display logo at the top center
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
-    st.image("logo.jpg", width=150)
+    # Load image with PIL and resize with high quality
+    img = Image.open("logo.jpg")
+    st.image(img, width=150)
 
 # File paths
 UPLOAD_FOLDER = "uploads"
