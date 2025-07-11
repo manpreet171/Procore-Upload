@@ -25,7 +25,7 @@ st.set_page_config(
 # Display logo at the top center
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
-    st.image("logo.jpg", use_container_width=True, width=100)
+    st.image("logo.jpg", use_container_width=True, width=50)
 
 # File paths
 UPLOAD_FOLDER = "uploads"
