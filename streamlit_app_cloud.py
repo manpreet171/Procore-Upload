@@ -22,6 +22,11 @@ st.set_page_config(
     layout="centered"
 )
 
+# Display logo at the top center
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    st.image("logo.png", use_column_width=True)
+
 # File paths
 UPLOAD_FOLDER = "uploads"
 CSV_FILE = "Procore Project Email List.csv"
