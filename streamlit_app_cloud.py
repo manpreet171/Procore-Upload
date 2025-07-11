@@ -23,13 +23,13 @@ st.set_page_config(
     layout="centered"
 )
 
-# Display logo at the top center
+# Display logo at the left
 col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
+with col1:
     # Load image with PIL and resize with high quality
     img = Image.open("logo.jpg")
     # Resize with high quality resampling
-    new_width = 150
+    new_width = 100
     width_percent = (new_width / float(img.size[0]))
     new_height = int((float(img.size[1]) * float(width_percent)))
     img = img.resize((new_width, new_height), Image.LANCZOS)
