@@ -26,8 +26,9 @@ st.set_page_config(
 UPLOAD_FOLDER = "uploads"
 CSV_FILE = "Procore Project Email List.csv"
 CHANGE_LOG_FILE = "change_log.csv"
+
 '''
-# Default configuration
+# Default configuration - KEPT FOR REFERENCE ONLY (NOT USED)
 EMAIL_SENDER = "manpreet@sdgny.com"
 EMAIL_SENDER_NAME = "Project Upload"
 BREVO_SMTP_SERVER = "smtp-relay.brevo.com"
@@ -36,17 +37,31 @@ BREVO_SMTP_LOGIN = "919624001@smtp-brevo.com"
 BREVO_SMTP_PASSWORD = "JVgNcDARtEBXyKYG"
 ADMIN_PASSWORD = "admin123"
 SLACK_WEBHOOK_URL = ""
-'''''
+'''
+
+# Initialize with empty defaults
+EMAIL_SENDER = ""
+EMAIL_SENDER_NAME = "Project Upload"
+BREVO_SMTP_SERVER = ""
+BREVO_SMTP_PORT = 587
+BREVO_SMTP_LOGIN = ""
+BREVO_SMTP_PASSWORD = ""
+ADMIN_PASSWORD = "admin123"
+SLACK_WEBHOOK_URL = ""
+
 # Override with secrets if available
-if 'EMAIL_SENDER' in st.secrets:
-    EMAIL_SENDER = st.secrets["EMAIL_SENDER"]
-    EMAIL_SENDER_NAME = st.secrets.get("EMAIL_SENDER_NAME", EMAIL_SENDER_NAME)
-    BREVO_SMTP_SERVER = st.secrets.get("BREVO_SMTP_SERVER", BREVO_SMTP_SERVER)
-    BREVO_SMTP_PORT = st.secrets.get("BREVO_SMTP_PORT", BREVO_SMTP_PORT)
-    BREVO_SMTP_LOGIN = st.secrets.get("BREVO_SMTP_LOGIN", BREVO_SMTP_LOGIN)
-    BREVO_SMTP_PASSWORD = st.secrets.get("BREVO_SMTP_PASSWORD", BREVO_SMTP_PASSWORD)
-    ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", ADMIN_PASSWORD)
-    SLACK_WEBHOOK_URL = st.secrets.get("SLACK_WEBHOOK_URL", SLACK_WEBHOOK_URL)
+try:
+    if 'EMAIL_SENDER' in st.secrets:
+        EMAIL_SENDER = st.secrets["EMAIL_SENDER"]
+        EMAIL_SENDER_NAME = st.secrets.get("EMAIL_SENDER_NAME", EMAIL_SENDER_NAME)
+        BREVO_SMTP_SERVER = st.secrets.get("BREVO_SMTP_SERVER", BREVO_SMTP_SERVER)
+        BREVO_SMTP_PORT = st.secrets.get("BREVO_SMTP_PORT", BREVO_SMTP_PORT)
+        BREVO_SMTP_LOGIN = st.secrets.get("BREVO_SMTP_LOGIN", BREVO_SMTP_LOGIN)
+        BREVO_SMTP_PASSWORD = st.secrets.get("BREVO_SMTP_PASSWORD", BREVO_SMTP_PASSWORD)
+        ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", ADMIN_PASSWORD)
+        SLACK_WEBHOOK_URL = st.secrets.get("SLACK_WEBHOOK_URL", SLACK_WEBHOOK_URL)
+except Exception as e:
+    st.sidebar.error(f"Error loading secrets: {str(e)}")
 
 # Create upload folder if it doesn't exist
 if not os.path.exists(UPLOAD_FOLDER):
