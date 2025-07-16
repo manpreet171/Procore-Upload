@@ -16,7 +16,7 @@ import uuid
 import tempfile
 import subprocess
 from PIL import Image
-import pyodbc
+import pymssql
 import urllib.parse
 
 # Set page configuration
@@ -103,34 +103,34 @@ if not os.path.exists(UPLOAD_FOLDER):
 
 # Database connection function
 def get_db_connection():
-    """Create a connection to the Azure SQL database with enhanced error handling"""
+    """Create a connection to the Azure SQL database with enhanced error handling using pymssql"""
     try:
         # Log connection attempt details (without password)
-        st.sidebar.info(f"Attempting to connect to: {DB_SERVER}/{DB_NAME} using driver: {DB_DRIVER}")
+        st.sidebar.info(f"Attempting to connect to: {DB_SERVER}/{DB_NAME}")
         
-        # Create connection string with connection timeout and connection pooling
-        conn_str = f"DRIVER={DB_DRIVER};SERVER={DB_SERVER};DATABASE={DB_NAME};UID={DB_USERNAME};PWD={DB_PASSWORD};Connection Timeout=30;"
-        
-        # Connect to the database
-        conn = pyodbc.connect(conn_str)
-        
-        # Set connection properties for better performance
-        conn.setdecoding(pyodbc.SQL_CHAR, encoding='utf-8')
-        conn.setdecoding(pyodbc.SQL_WCHAR, encoding='utf-8')
-        conn.setencoding(encoding='utf-8')
+        # Connect to the database using pymssql
+        # Note: pymssql doesn't use ODBC drivers, so we don't need DB_DRIVER anymore
+        conn = pymssql.connect(
+            server=DB_SERVER,
+            database=DB_NAME,
+            user=DB_USERNAME,
+            password=DB_PASSWORD,
+            timeout=30,
+            charset='UTF-8'
+        )
         
         # Log successful connection
         st.sidebar.success(f"Successfully connected to {DB_SERVER}/{DB_NAME}")
         
         return conn, None
-    except pyodbc.Error as e:
+    except pymssql.Error as e:
         error_code = e.args[0] if len(e.args) > 0 else "Unknown"
         error_message = f"Database connection error [{error_code}]: {str(e)}"
         st.sidebar.error(error_message)
         
         # Add more diagnostic information
-        st.sidebar.error(f"Driver: {DB_DRIVER}, Server: {DB_SERVER}, DB: {DB_NAME}")
-        st.sidebar.info("Check if the ODBC driver is installed and the server allows connections from this IP")
+        st.sidebar.error(f"Server: {DB_SERVER}, DB: {DB_NAME}")
+        st.sidebar.info("Check if the server allows connections from this IP address")
         
         return None, error_message
     except Exception as e:
@@ -314,10 +314,10 @@ def get_email_for_project(project_id):
             return None
             
         cursor = conn.cursor()
-        query = "SELECT ProcorePhotoEmail FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?"
+        query = "SELECT ProcorePhotoEmail FROM dbo.ProcoreProjectData WHERE ProjectNumber = %s"
         st.sidebar.write(f"Query: {query} with param: {str(project_id)}")
         
-        cursor.execute(query, str(project_id))
+        cursor.execute(query, (str(project_id),))
         result = cursor.fetchone()
         
         if not result:
@@ -344,7 +344,7 @@ def add_project_to_db(project_id, email):
         project_id_str = str(project_id)
         
         # Check if project already exists
-        cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", project_id_str)
+        cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = %s", (project_id_str,))
         count = cursor.fetchone()[0]
         if count > 0:
             cursor.close()
@@ -355,8 +355,8 @@ def add_project_to_db(project_id, email):
         cursor.execute("""
         INSERT INTO dbo.ProcoreProjectData 
         (ProjectNumber, ProjectName, ProcorePhotoEmail) 
-        VALUES (?, ?, ?)
-        """, project_id_str, f"Project {project_id_str}", email)
+        VALUES (%s, %s, %s)
+        """, (project_id_str, f"Project {project_id_str}", email))
         
         # Log the change
         log_change("add", project_id_str, f"Added project with email: {email}")
@@ -381,7 +381,7 @@ def edit_project_in_db(old_project_id, new_project_id, new_email):
         new_project_id_str = str(new_project_id)
         
         # Check if old project exists
-        cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", old_project_id_str)
+        cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = %s", (old_project_id_str,))
         count = cursor.fetchone()[0]
         if count == 0:
             cursor.close()
@@ -390,7 +390,7 @@ def edit_project_in_db(old_project_id, new_project_id, new_email):
         
         # Check if new project ID already exists (unless it's the same as old)
         if old_project_id_str != new_project_id_str:
-            cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", new_project_id_str)
+            cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = %s", (new_project_id_str,))
             count = cursor.fetchone()[0]
             if count > 0:
                 cursor.close()
@@ -400,16 +400,16 @@ def edit_project_in_db(old_project_id, new_project_id, new_email):
             # Update the project ID and email
             cursor.execute("""
             UPDATE dbo.ProcoreProjectData 
-            SET ProjectNumber = ?, ProcorePhotoEmail = ? 
-            WHERE ProjectNumber = ?
-            """, new_project_id_str, new_email, old_project_id_str)
+            SET ProjectNumber = %s, ProcorePhotoEmail = %s 
+            WHERE ProjectNumber = %s
+            """, (new_project_id_str, new_email, old_project_id_str))
         else:
             # Update just the email
             cursor.execute("""
             UPDATE dbo.ProcoreProjectData 
-            SET ProcorePhotoEmail = ? 
-            WHERE ProjectNumber = ?
-            """, new_email, old_project_id_str)
+            SET ProcorePhotoEmail = %s 
+            WHERE ProjectNumber = %s
+            """, (new_email, old_project_id_str))
         
         # Log the change
         log_change("edit", new_project_id_str, f"Updated project from {old_project_id_str} to {new_project_id_str} with email: {new_email}")
@@ -433,7 +433,7 @@ def delete_project_from_db(project_id):
         project_id_str = str(project_id)
         
         # Check if project exists and get email for logging
-        cursor.execute("SELECT ProcorePhotoEmail FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", project_id_str)
+        cursor.execute("SELECT ProcorePhotoEmail FROM dbo.ProcoreProjectData WHERE ProjectNumber = %s", (project_id_str,))
         result = cursor.fetchone()
         if not result:
             cursor.close()
@@ -443,7 +443,7 @@ def delete_project_from_db(project_id):
         email = result[0]
         
         # Delete the project
-        cursor.execute("DELETE FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", project_id_str)
+        cursor.execute("DELETE FROM dbo.ProcoreProjectData WHERE ProjectNumber = %s", (project_id_str,))
         
         # Log the change
         log_change("delete", project_id_str, f"Deleted project with email: {email}")
@@ -491,7 +491,7 @@ def bulk_import_projects(file):
             email = row['Email ID link']
             
             # Check if project already exists
-            cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", project_id)
+            cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = %s", (project_id,))
             count = cursor.fetchone()[0]
             
             if count > 0:
@@ -502,8 +502,8 @@ def bulk_import_projects(file):
             cursor.execute("""
             INSERT INTO dbo.ProcoreProjectData 
             (ProjectNumber, ProjectName, ProcorePhotoEmail) 
-            VALUES (?, ?, ?)
-            """, project_id, f"Project {project_id}", email)
+            VALUES (%s, %s, %s)
+            """, (project_id, f"Project {project_id}", email))
             added += 1
             
             # Log the change
@@ -532,8 +532,8 @@ def log_change(action, project_id, details):
         # Insert the log entry
         cursor.execute("""
         INSERT INTO ProcoreChangeLog (timestamp, action, project_number, details)
-        VALUES (?, ?, ?, ?)
-        """, timestamp, action, str(project_id), details)
+        VALUES (%s, %s, %s, %s)
+        """, (timestamp, action, str(project_id), details))
         
         conn.commit()
         cursor.close()
@@ -921,7 +921,7 @@ def view_projects_tab():
     st.header("View Projects")
     
     # Get all projects from database
-    projects_df = get_projects_from_db()
+    projects_df = get_projects_from_csv()
     
     if projects_df.empty:
         st.warning("No projects found")
