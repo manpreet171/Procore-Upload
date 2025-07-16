@@ -1,2 +1,0 @@
-# Streamlit Cloud has built-in SQL Server ODBC drivers
-# No additional system packages needed for SQL Server connectivity
