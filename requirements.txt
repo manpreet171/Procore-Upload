@@ -3,5 +3,5 @@ pandas==2.3.1     # latest release: July 7, 2025 :contentReference[oaicite:2]{in
 openpyxl==3.1.5   # latest PyPI release: June 28, 2024 :contentReference[oaicite:3]{index=3}
 requests==2.31.0
 gitpython
-pyodbc==4.0.39    # For Azure SQL Database connectivity
+pyodbc==5.2.0    # For Azure SQL Database connectivity
 azure-identity    # For Azure authentication
