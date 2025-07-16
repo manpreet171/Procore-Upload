@@ -6,7 +6,8 @@ A Streamlit application for uploading images associated with Project IDs, sendin
 
 - **Upload Images**: Upload multiple images and send them via email based on Project ID
 - **Manage Projects**: Add and view Project IDs and their associated email addresses
-- **Excel Integration**: Automatically store and retrieve project information from an Excel file
+- **Azure SQL Database**: Store and retrieve project information from Azure SQL Database
+- **GitHub Integration**: Backup data to GitHub repository
 
 ## Setup Instructions
 
@@ -17,6 +18,45 @@ A Streamlit application for uploading images associated with Project IDs, sendin
    git clone https://github.com/yourusername/project-image-upload.git
    cd project-image-upload
    ```
+
+### Azure SQL Database Configuration
+
+1. Create an Azure SQL Database or use an existing one
+2. Configure your Streamlit secrets with the following Azure SQL credentials:
+   ```toml
+   # .streamlit/secrets.toml
+   
+   # Database credentials
+   DB_SERVER = "your-server.database.windows.net"
+   DB_NAME = "your-database"
+   DB_USERNAME = "your-username"
+   DB_PASSWORD = "your-password"
+   DB_DRIVER = "ODBC Driver 17 for SQL Server"  # For Linux/Streamlit Cloud
+   # DB_DRIVER = "{ODBC Driver 17 for SQL Server}"  # For Windows
+   
+   # Email credentials
+   EMAIL_SENDER = "your-email@example.com"
+   EMAIL_SENDER_NAME = "Project Upload"
+   BREVO_SMTP_SERVER = "smtp-relay.brevo.com"
+   BREVO_SMTP_PORT = 587
+   BREVO_SMTP_LOGIN = "your-brevo-login"
+   BREVO_SMTP_PASSWORD = "your-brevo-password"
+   
+   # Admin password
+   ADMIN_PASSWORD = "your-admin-password"
+   
+   # GitHub credentials
+   GITHUB_USERNAME = "your-github-username"
+   GITHUB_EMAIL = "your-github-email"
+   GITHUB_TOKEN = "your-github-token"
+   GITHUB_REPO = "your-repo-name"
+   ```
+
+### Streamlit Cloud Deployment
+
+1. Push your code to GitHub
+2. Deploy on Streamlit Cloud and add the secrets from above
+3. Streamlit Cloud has built-in support for SQL Server ODBC drivers, so no additional configuration is needed
 
 2. Install dependencies:
    ```
