@@ -1,4 +1,5 @@
 import os
+import sys
 import streamlit as st
 import pandas as pd
 import smtplib
@@ -56,7 +57,11 @@ DB_SERVER = ""
 DB_NAME = ""
 DB_USERNAME = ""
 DB_PASSWORD = ""
-DB_DRIVER = "{ODBC Driver 17 for SQL Server}"
+# Default driver - will be overridden based on platform
+if os.name == 'nt':  # Windows
+    DB_DRIVER = "{ODBC Driver 17 for SQL Server}"
+else:  # Linux (including Streamlit Cloud)
+    DB_DRIVER = "ODBC Driver 17 for SQL Server"
 
 # Override with secrets if available
 try:
@@ -83,7 +88,12 @@ try:
         DB_NAME = os.getenv('AZURE_DB_NAME', 'dw-sqldb')
         DB_USERNAME = os.getenv('AZURE_DB_USERNAME', 'manpreet')
         DB_PASSWORD = os.getenv('AZURE_DB_PASSWORD', 'KYqPn@!)')
-        DB_DRIVER = os.getenv('AZURE_DB_DRIVER', '{ODBC Driver 17 for SQL Server}')
+        
+        # Use appropriate driver format based on platform
+        if os.name == 'nt':  # Windows
+            DB_DRIVER = os.getenv('AZURE_DB_DRIVER', '{ODBC Driver 17 for SQL Server}')
+        else:  # Linux (including Streamlit Cloud)
+            DB_DRIVER = os.getenv('AZURE_DB_DRIVER', 'ODBC Driver 17 for SQL Server')
 except Exception as e:
     st.sidebar.error(f"Error loading secrets: {str(e)}")
 
@@ -95,8 +105,10 @@ if not os.path.exists(UPLOAD_FOLDER):
 def get_db_connection():
     """Create a connection to the Azure SQL database with enhanced error handling"""
     try:
+        # Log connection attempt details (without password)
+        st.sidebar.info(f"Attempting to connect to: {DB_SERVER}/{DB_NAME} using driver: {DB_DRIVER}")
+        
         # Create connection string with connection timeout and connection pooling
-        params = urllib.parse.quote_plus(f"DRIVER={DB_DRIVER};SERVER={DB_SERVER};DATABASE={DB_NAME};UID={DB_USERNAME};PWD={DB_PASSWORD};Connection Timeout=30;")
         conn_str = f"DRIVER={DB_DRIVER};SERVER={DB_SERVER};DATABASE={DB_NAME};UID={DB_USERNAME};PWD={DB_PASSWORD};Connection Timeout=30;"
         
         # Connect to the database
@@ -107,15 +119,27 @@ def get_db_connection():
         conn.setdecoding(pyodbc.SQL_WCHAR, encoding='utf-8')
         conn.setencoding(encoding='utf-8')
         
+        # Log successful connection
+        st.sidebar.success(f"Successfully connected to {DB_SERVER}/{DB_NAME}")
+        
         return conn, None
     except pyodbc.Error as e:
         error_code = e.args[0] if len(e.args) > 0 else "Unknown"
         error_message = f"Database connection error [{error_code}]: {str(e)}"
         st.sidebar.error(error_message)
+        
+        # Add more diagnostic information
+        st.sidebar.error(f"Driver: {DB_DRIVER}, Server: {DB_SERVER}, DB: {DB_NAME}")
+        st.sidebar.info("Check if the ODBC driver is installed and the server allows connections from this IP")
+        
         return None, error_message
     except Exception as e:
         error_message = f"Unexpected database error: {str(e)}"
         st.sidebar.error(error_message)
+        
+        # Add platform information for debugging
+        st.sidebar.info(f"Platform: {os.name}, Python: {sys.version}")
+        
         return None, error_message
 
 # Initialize database tables if needed
