@@ -42,6 +42,9 @@ with col1:
 # File paths
 UPLOAD_FOLDER = "uploads"
 
+# Allowed file extensions for uploads
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tif', 'tiff', 'pdf'}
+
 # Initialize with empty defaults
 EMAIL_SENDER = ""
 EMAIL_SENDER_NAME = "Project Upload"
@@ -84,10 +87,10 @@ try:
         DB_DRIVER = st.secrets.get("DB_DRIVER", DB_DRIVER)
     else:
         # Use environment variables as fallback
-        DB_SERVER = os.getenv('AZURE_DB_SERVER', 'dw-sqlsvr.database.windows.net')
-        DB_NAME = os.getenv('AZURE_DB_NAME', 'dw-sqldb')
-        DB_USERNAME = os.getenv('AZURE_DB_USERNAME', 'manpreet')
-        DB_PASSWORD = os.getenv('AZURE_DB_PASSWORD', 'KYqPn@!)')
+        DB_SERVER = os.getenv('AZURE_DB_SERVER', '')
+        DB_NAME = os.getenv('AZURE_DB_NAME', '')
+        DB_USERNAME = os.getenv('AZURE_DB_USERNAME', '')
+        DB_PASSWORD = os.getenv('AZURE_DB_PASSWORD', '')
         
         # Use appropriate driver format based on platform
         if os.name == 'nt':  # Windows
@@ -100,6 +103,45 @@ except Exception as e:
 # Create upload folder if it doesn't exist
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+    
+# Helper functions
+def verify_password(password):
+    """Verify if the provided password matches the admin password"""
+    return password == ADMIN_PASSWORD
+
+def send_email(recipient_email, subject, body, attachments=None):
+    """Send email with optional attachments using Brevo SMTP"""
+    try:
+        # Create message container
+        msg = MIMEMultipart()
+        msg['From'] = f"{EMAIL_SENDER_NAME} <{EMAIL_SENDER}>"
+        msg['To'] = recipient_email
+        msg['Subject'] = subject
+        
+        # Add body to email
+        msg.attach(MIMEText(body, 'html'))
+        
+        # Add attachments
+        if attachments:
+            for file_path in attachments:
+                with open(file_path, 'rb') as file:
+                    # Get the filename from the path
+                    filename = os.path.basename(file_path)
+                    part = MIMEApplication(file.read(), Name=filename)
+                    part['Content-Disposition'] = f'attachment; filename="{filename}"'
+                    msg.attach(part)
+        
+        # Connect to SMTP server and send email
+        server = smtplib.SMTP(BREVO_SMTP_SERVER, BREVO_SMTP_PORT)
+        server.starttls()
+        server.login(BREVO_SMTP_LOGIN, BREVO_SMTP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        
+        return True
+    except Exception as e:
+        st.error(f"Error sending email: {str(e)}")
+        return False
 
 # Database connection function
 def get_db_connection():
