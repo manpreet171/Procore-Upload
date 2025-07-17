@@ -14,7 +14,14 @@ def get_sharepoint_context():
         # Get SharePoint app credentials from Streamlit secrets
         client_id = st.secrets["SHAREPOINT_CLIENT_ID"]
         client_secret = st.secrets["SHAREPOINT_CLIENT_SECRET"]
-        site_url = "https://sdgny.sharepoint.com/sites/sharedadmin"
+        
+        # Try different SharePoint site URLs
+        # First try the tenant root site
+        site_url = "https://sdgny.sharepoint.com"
+        
+        # Print debug information
+        print(f"Attempting to connect to SharePoint with client ID: {client_id[:5]}...")
+        print(f"Site URL: {site_url}")
         
         try:
             # Create client credentials and client context
@@ -26,11 +33,31 @@ def get_sharepoint_context():
             ctx.load(web)
             ctx.execute_query()
             
+            print(f"Successfully connected to SharePoint site: {web.properties['Title']}")
             return ctx, None
         except Exception as e:
             error_msg = str(e)
-            return None, f"SharePoint authentication error: {error_msg}"
+            print(f"Error connecting to {site_url}: {error_msg}")
+            
+            # Try the specific site collection as fallback
+            site_url = "https://sdgny.sharepoint.com/sites/sharedadmin"
+            print(f"Trying alternate site URL: {site_url}")
+            
+            try:
+                client_credentials = ClientCredential(client_id, client_secret)
+                ctx = ClientContext(site_url).with_credentials(client_credentials)
+                web = ctx.web
+                ctx.load(web)
+                ctx.execute_query()
+                
+                print(f"Successfully connected to SharePoint site: {web.properties['Title']}")
+                return ctx, None
+            except Exception as e2:
+                error_msg = str(e2)
+                print(f"Error connecting to {site_url}: {error_msg}")
+                return None, f"SharePoint authentication error: {error_msg}"
     except Exception as e:
+        print(f"General error: {str(e)}")
         return None, f"SharePoint authentication error: {str(e)}"
 
 def ensure_folder_exists(ctx, relative_folder_path):
