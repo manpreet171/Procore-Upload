@@ -8,7 +8,6 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import time
 import io
-import git
 import datetime
 import requests
 import shutil
@@ -230,98 +229,10 @@ def init_database():
         st.sidebar.error(f"Error initializing database: {str(e)}")
         return False
 
-# Git operations
-def setup_github_auth():
-    """Setup GitHub authentication using token from secrets"""
-    try:
-        # Check if we're in a git repository
-        repo = git.Repo('.')
-        
-        # Configure Git user
-        if 'GITHUB_USERNAME' in st.secrets and 'GITHUB_EMAIL' in st.secrets:
-            repo.git.config('user.name', st.secrets['GITHUB_USERNAME'])
-            repo.git.config('user.email', st.secrets['GITHUB_EMAIL'])
-        
-        # Set up HTTPS authentication with token
-        if 'GITHUB_TOKEN' in st.secrets and 'GITHUB_USERNAME' in st.secrets:
-            username = st.secrets['GITHUB_USERNAME']
-            token = st.secrets['GITHUB_TOKEN']
-            repo_name = st.secrets.get('GITHUB_REPO', 'Procore-Upload')
-            
-            # Set the remote URL with token authentication
-            new_url = f"https://{username}:{token}@github.com/{username}/{repo_name}.git"
-            
-            # Check if remote exists
-            try:
-                remote_url = repo.git.remote('get-url', 'origin')
-                # Update existing remote
-                repo.git.remote('set-url', 'origin', new_url)
-            except git.GitCommandError:
-                # Remote doesn't exist, add it
-                repo.git.remote('add', 'origin', new_url)
-        
-        return True, "GitHub authentication set up successfully"
-    except Exception as e:
-        return False, f"Error setting up GitHub authentication: {e}"
+# Database is the only storage mechanism - Git operations removed
 
-def git_pull():
-    """Pull latest changes from GitHub repository"""
-    try:
-        # Set up GitHub authentication
-        setup_github_auth()
-        
-        # Pull changes
-        repo = git.Repo('.')
-        try:
-            repo.git.pull('origin', 'main')
-        except git.GitCommandError:
-            try:
-                repo.git.pull('origin', 'master')
-            except git.GitCommandError:
-                pass  # Ignore if both fail
-        
-        return True, "Successfully pulled latest changes"
-    except Exception as e:
-        return False, f"Error pulling from GitHub: {e}"
-
-def git_commit_and_push(file_path, commit_message):
-    """Commit and push changes to GitHub repository"""
-    try:
-        # Set up GitHub authentication
-        setup_github_auth()
-        
-        repo = git.Repo('.')
-        
-        # Add and commit
-        repo.git.add(file_path)
-        
-        # Check if there are changes to commit
-        if not repo.git.diff('--staged'):
-            return True, "No changes to commit"
-            
-        repo.git.commit('-m', commit_message)
-        
-        # Try to push to main branch first, then master if that fails
-        try:
-            repo.git.push('origin', 'main')
-        except git.GitCommandError:
-            try:
-                repo.git.push('origin', 'master')
-            except git.GitCommandError:
-                # If both fail, try to push to current branch
-                current_branch = repo.active_branch.name
-                try:
-                    repo.git.push('origin', current_branch)
-                except git.GitCommandError as e:
-                    st.warning(f"Changes committed locally but not pushed to GitHub: {e}")
-                    return True, "Changes saved locally (not pushed to GitHub)"
-        
-        return True, "Successfully pushed changes to GitHub"
-    except Exception as e:
-        return False, f"Error with Git operations: {e}"
-
-# CSV operations
-def get_projects_from_csv():
+# Database operations
+def get_projects_from_db():
     try:
         conn, error = get_db_connection()
         if error:
