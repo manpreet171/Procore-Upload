@@ -13,13 +13,6 @@ import requests
 import shutil
 import uuid
 import tempfile
-
-# Import SharePoint utilities
-try:
-    from sharepoint_utils import get_sharepoint_context, ensure_folder_exists, upload_file_to_sharepoint
-    SHAREPOINT_AVAILABLE = True
-except ImportError:
-    SHAREPOINT_AVAILABLE = False
 import subprocess
 from PIL import Image
 import pyodbc
@@ -275,67 +268,6 @@ def get_all_project_ids():
         return project_ids
     except Exception as e:
         return []
-
-# Shopify database operations
-def get_shopify_orders_from_db():
-    """Get all Shopify orders from the database"""
-    try:
-        conn, error = get_db_connection()
-        if error:
-            st.error(error)
-            return pd.DataFrame(columns=['Order ID', 'Customer Name', 'Customer Email'])
-            
-        # Query the database for Shopify orders
-        query = "SELECT OrderID as 'Order ID', CustomerName as 'Customer Name', CustomerEmail as 'Customer Email' FROM dbo.ShopifyProjectData"
-        df = pd.read_sql(query, conn)
-        conn.close()
-        return df
-    except Exception as e:
-        st.error(f"Error reading Shopify orders from database: {str(e)}")
-        return pd.DataFrame(columns=['Order ID', 'Customer Name', 'Customer Email'])
-
-def get_all_order_ids():
-    """Get all Shopify order IDs from the database for autocomplete"""
-    try:
-        conn, error = get_db_connection()
-        if error:
-            return []
-            
-        # Query the database for order IDs only
-        query = "SELECT OrderID FROM dbo.ShopifyProjectData ORDER BY OrderID"
-        cursor = conn.cursor()
-        cursor.execute(query)
-        
-        # Extract order IDs from the result
-        order_ids = [row[0] for row in cursor.fetchall()]
-        
-        cursor.close()
-        conn.close()
-        return order_ids
-    except Exception as e:
-        return []
-
-def get_customer_name_for_order(order_id):
-    """Get customer name for a specific order ID"""
-    try:
-        conn, error = get_db_connection()
-        if error:
-            return None
-            
-        cursor = conn.cursor()
-        cursor.execute("SELECT CustomerName FROM dbo.ShopifyProjectData WHERE OrderID = ?", order_id)
-        result = cursor.fetchone()
-        
-        cursor.close()
-        conn.close()
-        
-        if result:
-            return result[0]
-        else:
-            return None
-    except Exception as e:
-        st.error(f"Error getting customer name: {str(e)}")
-        return None
 
 def get_email_for_project(project_id):
     """Get email for a specific project ID"""
@@ -1052,123 +984,6 @@ def manage_projects_tab():
 
 # Note: view_projects_tab and view_logs_tab functions have been integrated into the manage_projects_tab function
 
-def shopify_orders_tab():
-    """Tab for handling Shopify orders and uploading images to SharePoint"""
-    # Initialize session state variables if they don't exist
-    if 'shopify_form_submitted' not in st.session_state:
-        st.session_state.shopify_form_submitted = False
-    
-    # Only generate new form keys when the form is submitted successfully
-    # or when the app first loads and keys don't exist
-    if 'shopify_form_key_prefix' not in st.session_state or st.session_state.shopify_form_submitted:
-        st.session_state.shopify_form_key_prefix = f"shopify_upload_form_{int(time.time())}"
-    
-    # Use the stored keys
-    order_id_key = f"{st.session_state.shopify_form_key_prefix}_order_id"
-    status_key = f"{st.session_state.shopify_form_key_prefix}_status"
-    file_uploader_key = f"{st.session_state.shopify_form_key_prefix}_files"
-    
-    # Check if we need to reset the form
-    if st.session_state.shopify_form_submitted:
-        # Reset the flag
-        st.session_state.shopify_form_submitted = False
-        # Force a rerun with clean state - no message about form reset
-        st.rerun()
-    
-    st.header("Upload Shopify Order Images")
-    
-    # Check if SharePoint integration is available
-    if not SHAREPOINT_AVAILABLE:
-        st.error("SharePoint integration is not available. Please check your installation.")
-        return
-    
-    # Get all order IDs for autocomplete
-    all_order_ids = get_all_order_ids()
-    
-    # Order ID input with autocomplete
-    if all_order_ids:
-        # Add an empty option at the beginning
-        order_id_options = [""]
-        order_id_options.extend(all_order_ids)
-        order_id = st.selectbox("Order ID", options=order_id_options, key=order_id_key)
-    else:
-        st.error("No orders found in the database. Please check your database connection.")
-        return
-    
-    # Get customer name for the selected order ID
-    customer_name = None
-    if order_id:
-        customer_name = get_customer_name_for_order(order_id)
-        if customer_name:
-            st.info(f"Customer: {customer_name}")
-        else:
-            st.warning("Customer name not found for this Order ID")
-    
-    # Status selection
-    status_options = ["", "Production", "Shipped", "Delivered", "Completed"]
-    status = st.selectbox("Status", options=status_options, key=status_key)
-    
-    # File uploader
-    uploaded_files = st.file_uploader("Upload Images", accept_multiple_files=True, type=["jpg", "jpeg", "png"], key=file_uploader_key)
-    
-    # Only show the upload button if all required fields are filled
-    if order_id and status and uploaded_files and customer_name:
-        if st.button("Upload Images to SharePoint", type="primary"):
-            # Create a temporary directory to save the uploaded files
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Save uploaded files to the temporary directory
-                saved_files = []
-                for uploaded_file in uploaded_files:
-                    file_path = os.path.join(temp_dir, uploaded_file.name)
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    saved_files.append(file_path)
-                
-                # Connect to SharePoint
-                ctx, error = get_sharepoint_context()
-                if error:
-                    st.error(f"SharePoint connection error: {error}")
-                    st.info("Note: If you're seeing an MFA error, you need to set up Azure AD App-Only authentication. Please add SHAREPOINT_CLIENT_ID and SHAREPOINT_CLIENT_SECRET to your Streamlit secrets.")
-                    return
-                
-                # Create folder structure inside the Shopify Photos root folder: /CustomerName/Status/OrderID/
-                folder_path = f"Shopify Photos/{customer_name}/{status}/{order_id}"
-                success, folder_url = ensure_folder_exists(ctx, folder_path)
-                
-                if not success:
-                    st.error(f"Failed to create folder structure: {folder_url}")
-                    return
-                
-                # Upload files to SharePoint
-                upload_success = True
-                upload_messages = []
-                
-                for file_path in saved_files:
-                    success, message = upload_file_to_sharepoint(ctx, file_path, folder_url)
-                    upload_messages.append(message)
-                    if not success:
-                        upload_success = False
-                
-                if upload_success:
-                    st.success(f"All images uploaded successfully to SharePoint folder: {folder_path}")
-                    # Set flag to reset form on next rerun
-                    st.session_state.shopify_form_submitted = True
-                    # Force a rerun to reset the form immediately
-                    time.sleep(1)  # Give user time to see the success message
-                    st.rerun()
-                else:
-                    st.error("Some files failed to upload. Please check the messages below.")
-                    for message in upload_messages:
-                        st.write(message)
-    elif not customer_name and order_id:
-        st.error("Customer name not found for this Order ID. Cannot proceed with upload.")
-    elif order_id and status and not uploaded_files:
-        st.warning("Please upload at least one image file.")
-    elif order_id and not status:
-        st.warning("Please select a status.")
-    elif not order_id:
-        st.warning("Please select an Order ID.")
-
 def main():
     st.title("Project Image Upload System")
     
@@ -1186,15 +1001,12 @@ def main():
     init_database()
     
     # Create tabs
-    tab1, tab2, tab3 = st.tabs(["Upload Images", "Shopify Orders", "Manage Projects"])
+    tab1, tab2 = st.tabs(["Upload Images", "Manage Projects"])
     
     with tab1:
         upload_images_tab()
     
     with tab2:
-        shopify_orders_tab()
-    
-    with tab3:
         manage_projects_tab()
 
 if __name__ == "__main__":
