@@ -721,6 +721,10 @@ def upload_images_tab():
     if 'form_submitted' not in st.session_state:
         st.session_state.form_submitted = False
     
+    # Initialize step tracking if it doesn't exist
+    if 'upload_step' not in st.session_state:
+        st.session_state.upload_step = 1
+    
     # Only generate new form keys when the form is submitted successfully
     # or when the app first loads and keys don't exist
     if 'form_key_prefix' not in st.session_state or st.session_state.form_submitted:
@@ -733,8 +737,9 @@ def upload_images_tab():
     
     # Check if we need to reset the form
     if st.session_state.form_submitted:
-        # Reset the flag
+        # Reset the flag and step
         st.session_state.form_submitted = False
+        st.session_state.upload_step = 1
         # Show a temporary success message
         st.success("Images sent successfully! Form has been reset.")
         # Force a rerun with clean state
@@ -743,85 +748,144 @@ def upload_images_tab():
     
     st.header("Upload Images")
     
-    # Get all project IDs for autocomplete
-    all_project_ids = get_all_project_ids()
-    
-    # Project ID input with autocomplete
-    if all_project_ids:
-        # Add an empty option at the beginning
-        project_id_options = [""]
-        project_id_options.extend(all_project_ids)
+    # Step 1: Project ID selection
+    if st.session_state.upload_step == 1:
+        # Get all project IDs for autocomplete
+        all_project_ids = get_all_project_ids()
         
-        # Use selectbox with autocomplete
-        project_id = st.selectbox(
-            "Project ID",
-            options=project_id_options,
-            key=project_id_key,
-            placeholder="Select or type to search Project ID",
-            index=0  # Default to empty option
-        )
-    else:
-        # Fallback to regular text input if no project IDs are available
-        project_id = st.text_input("Project ID", placeholder="Enter the Project ID", key=project_id_key)
-    
-    # Status dropdown with dynamic key
-    status_options = ["", "PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
-    status = st.selectbox("Status", options=status_options, key=status_key, index=0)  # Default to blank option
-    
-    # File upload with dynamic key
-    uploaded_files = st.file_uploader(
-        "Upload Images", 
-        accept_multiple_files=True,
-        type=list(ALLOWED_EXTENSIONS),
-        key=file_uploader_key
-    )
-    
-    if uploaded_files and project_id:
-        if st.button("Send Images"):
-            recipient_email = get_email_for_project(project_id)
+        # Project ID input with autocomplete
+        if all_project_ids:
+            # Add an empty option at the beginning
+            project_id_options = [""]
+            project_id_options.extend(all_project_ids)
             
-            if not recipient_email:
-                st.error(f"No email found for Project ID: {project_id}")
+            # Use selectbox with autocomplete
+            project_id = st.selectbox(
+                "Project ID",
+                options=project_id_options,
+                key=project_id_key,
+                placeholder="Select or type to search Project ID",
+                index=0  # Default to empty option
+            )
+        else:
+            # Fallback to regular text input if no project IDs are available
+            project_id = st.text_input("Project ID", placeholder="Enter the Project ID", key=project_id_key)
+        
+        # Store project_id in session state
+        if 'project_id' not in st.session_state:
+            st.session_state.project_id = ""
+        
+        # Continue button
+        if project_id:  # Only show continue button if project ID is selected
+            if st.button("Continue to Status Selection"):
+                st.session_state.project_id = project_id
+                st.session_state.upload_step = 2
+                st.rerun()
+        else:
+            st.info("Please select a Project ID to continue")
+    
+    # Step 2: Status selection
+    elif st.session_state.upload_step == 2:
+        # Display the selected project ID (read-only)
+        st.info(f"Selected Project ID: {st.session_state.project_id}")
+        
+        # Status dropdown with dynamic key
+        status_options = ["", "PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
+        status = st.selectbox("Status", options=status_options, key=status_key, index=0)  # Default to blank option
+        
+        # Store status in session state
+        if 'status' not in st.session_state:
+            st.session_state.status = ""
+        
+        # Back button
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("← Back"):
+                st.session_state.upload_step = 1
+                st.rerun()
+        
+        # Continue button
+        with col2:
+            if status and status != "":  # Only show continue button if status is selected
+                if st.button("Continue to Upload"):
+                    st.session_state.status = status
+                    st.session_state.upload_step = 3
+                    st.rerun()
             else:
-                # Save uploaded files
-                saved_files = []
-                for uploaded_file in uploaded_files:
-                    # Create a unique filename with status prefix
-                    file_extension = os.path.splitext(uploaded_file.name)[1]
-                    unique_filename = f"{status}_{uuid.uuid4()}{file_extension}"
-                    file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
+                st.info("Please select a Status to continue")
+    
+    # Step 3: File upload
+    elif st.session_state.upload_step == 3:
+        # Display the selected project ID and status (read-only)
+        st.info(f"Selected Project ID: {st.session_state.project_id} | Status: {st.session_state.status}")
+        
+        # File upload with dynamic key
+        uploaded_files = st.file_uploader(
+            "Upload Images", 
+            accept_multiple_files=True,
+            type=list(ALLOWED_EXTENSIONS),
+            key=file_uploader_key
+        )
+        
+        # Back button
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("← Back"):
+                st.session_state.upload_step = 2
+                st.rerun()
+        
+        # Send button
+        if uploaded_files:
+            with col2:
+                if st.button("Send Images"):
+                    # Get project_id and status from session state
+                    project_id = st.session_state.project_id
+                    status = st.session_state.status
                     
-                    # Save the file
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
+                    recipient_email = get_email_for_project(project_id)
                     
-                    saved_files.append(file_path)
-                
-                # Send email with attachments
-                subject = f"{status}"
-                body = f"<p>{status}</p>"
-                
-                if send_email(recipient_email, subject, body, saved_files):
-                    # Set flag to reset form on next rerun
-                    st.session_state.form_submitted = True
-                    st.success("Images sent successfully!")
-                    
-                    # Log to Slack if webhook URL is configured
-                    if SLACK_WEBHOOK_URL:
-                        try:
-                            slack_message = {
-                                "text": f"Images for Project ID: {project_id} with status '{status}' sent to {recipient_email}"
-                            }
-                            requests.post(SLACK_WEBHOOK_URL, json=slack_message)
-                        except Exception as e:
-                            st.warning(f"Could not send Slack notification: {e}")
-                else:
-                    st.error("Failed to send email. Please check the logs.")
-                    
-                    # Clean up files if email failed
-                    for file_path in saved_files:
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
+                    if not recipient_email:
+                        st.error(f"No email found for Project ID: {project_id}")
+                    else:
+                        # Save uploaded files
+                        saved_files = []
+                        for uploaded_file in uploaded_files:
+                            # Create a unique filename with status prefix
+                            file_extension = os.path.splitext(uploaded_file.name)[1]
+                            unique_filename = f"{status}_{uuid.uuid4()}{file_extension}"
+                            file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
+                            
+                            # Save the file
+                            with open(file_path, "wb") as f:
+                                f.write(uploaded_file.getbuffer())
+                            
+                            saved_files.append(file_path)
+                        
+                        # Send email with attachments
+                        subject = f"{status}"
+                        body = f"<p>{status}</p>"
+                        
+                        if send_email(recipient_email, subject, body, saved_files):
+                            # Set flag to reset form on next rerun
+                            st.session_state.form_submitted = True
+                            st.success("Images sent successfully!")
+                            
+                            # Log to Slack if webhook URL is configured
+                            if SLACK_WEBHOOK_URL:
+                                try:
+                                    slack_message = {
+                                        "text": f"Images for Project ID: {project_id} with status '{status}' sent to {recipient_email}"
+                                    }
+                                    requests.post(SLACK_WEBHOOK_URL, json=slack_message)
+                                except Exception as e:
+                                    st.warning(f"Could not send Slack notification: {e}")
+                        else:
+                            st.error("Failed to send email. Please check the logs.")
+                            
+                            # Clean up files if email failed
+                            for file_path in saved_files:
+                                if os.path.exists(file_path):
+                                    os.remove(file_path)
 
 def manage_projects_tab():
     st.header("Project Management")
