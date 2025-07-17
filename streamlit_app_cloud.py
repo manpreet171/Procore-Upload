@@ -776,7 +776,8 @@ def upload_images_tab():
         key=file_uploader_key
     )
     
-    if uploaded_files and project_id:
+    # Only show Send Images button if both Project ID and Status are selected (not blank)
+    if project_id and status and uploaded_files:
         if st.button("Send Images"):
             recipient_email = get_email_for_project(project_id)
             
