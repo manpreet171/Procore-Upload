@@ -1128,10 +1128,10 @@ def shopify_orders_tab():
                 ctx, error = get_sharepoint_context()
                 if error:
                     st.error(f"SharePoint connection error: {error}")
+                    st.info("Note: If you're seeing an MFA error, you need to set up Azure AD App-Only authentication. Please add SHAREPOINT_CLIENT_ID and SHAREPOINT_CLIENT_SECRET to your Streamlit secrets.")
                     return
                 
                 # Create folder structure inside the Shopify Photos root folder: /CustomerName/Status/OrderID/
-                # Using the exact Shopify Photos folder you created in SharePoint
                 folder_path = f"Shopify Photos/{customer_name}/{status}/{order_id}"
                 success, folder_url = ensure_folder_exists(ctx, folder_path)
                 

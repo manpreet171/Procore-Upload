@@ -1,26 +1,35 @@
 import os
 import streamlit as st
-from office365.runtime.auth.user_credential import UserCredential
+from office365.runtime.auth.client_credential import ClientCredential
 from office365.sharepoint.client_context import ClientContext
 from office365.sharepoint.files.file import File
 
 def get_sharepoint_context():
-    """Get SharePoint client context using credentials from Streamlit secrets"""
+    """Get SharePoint client context using Azure AD App-Only authentication"""
     try:
-        # Check if SharePoint credentials exist in Streamlit secrets
-        if "SHAREPOINT_USERNAME" not in st.secrets or "SHAREPOINT_PASSWORD" not in st.secrets:
-            return None, "SharePoint credentials not found in Streamlit secrets. Please add SHAREPOINT_USERNAME and SHAREPOINT_PASSWORD."
+        # Check if SharePoint app credentials exist in Streamlit secrets
+        if "SHAREPOINT_CLIENT_ID" not in st.secrets or "SHAREPOINT_CLIENT_SECRET" not in st.secrets:
+            return None, "SharePoint app credentials not found in Streamlit secrets. Please add SHAREPOINT_CLIENT_ID and SHAREPOINT_CLIENT_SECRET."
         
-        # Get SharePoint credentials from Streamlit secrets
-        username = st.secrets["SHAREPOINT_USERNAME"]
-        password = st.secrets["SHAREPOINT_PASSWORD"]
+        # Get SharePoint app credentials from Streamlit secrets
+        client_id = st.secrets["SHAREPOINT_CLIENT_ID"]
+        client_secret = st.secrets["SHAREPOINT_CLIENT_SECRET"]
         site_url = "https://sdgny.sharepoint.com/sites/sharedadmin"
         
-        # Create user credentials and client context
-        user_credentials = UserCredential(username, password)
-        ctx = ClientContext(site_url).with_credentials(user_credentials)
-        
-        return ctx, None
+        try:
+            # Create client credentials and client context
+            client_credentials = ClientCredential(client_id, client_secret)
+            ctx = ClientContext(site_url).with_credentials(client_credentials)
+            
+            # Test the connection by getting the web title
+            web = ctx.web
+            ctx.load(web)
+            ctx.execute_query()
+            
+            return ctx, None
+        except Exception as e:
+            error_msg = str(e)
+            return None, f"SharePoint authentication error: {error_msg}"
     except Exception as e:
         return None, f"SharePoint authentication error: {str(e)}"
 
