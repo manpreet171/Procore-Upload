@@ -1,7 +1,8 @@
 import os
 import streamlit as st
-from office365.runtime.auth.authentication_context import AuthenticationContext
+import requests
 from office365.runtime.auth.client_credential import ClientCredential
+from office365.runtime.auth.authentication_context import AuthenticationContext
 from office365.sharepoint.client_context import ClientContext
 from office365.sharepoint.files.file import File
 
@@ -16,44 +17,31 @@ def get_sharepoint_context():
         client_id = st.secrets["SHAREPOINT_CLIENT_ID"]
         client_secret = st.secrets["SHAREPOINT_CLIENT_SECRET"]
         
-        # Define the SharePoint site URL
-        site_url = "https://sdgny.sharepoint.com/sites/sharedadmin"
+        # Print debug information about the client ID and secret format
+        print(f"Client ID length: {len(client_id)}")
+        print(f"Client Secret length: {len(client_secret)}")
+        print(f"Client ID first 5 chars: {client_id[:5]}...")
+        print(f"Client Secret first 5 chars: {client_secret[:5]}...")
         
-        try:
-            # Print debug information
-            print(f"Attempting to connect to SharePoint with client ID: {client_id[:5]}...")
-            print(f"Site URL: {site_url}")
-            
-            # Create authentication context
-            auth_context = AuthenticationContext(site_url)
-            auth_context.acquire_token_for_app(client_id=client_id, client_secret=client_secret)
-            
-            # Create client context with the authentication context
-            ctx = ClientContext(site_url, auth_context)
-            
-            # Test the connection by getting the web title
-            web = ctx.web
-            ctx.load(web)
-            ctx.execute_query()
-            
-            print(f"Successfully connected to SharePoint site: {web.properties['Title']}")
-            return ctx, None
-            
-        except Exception as e:
-            error_msg = str(e)
-            print(f"Error connecting to {site_url}: {error_msg}")
-            
-            # Try the tenant root site as fallback
+        # Try both site URLs with detailed error logging
+        site_urls = [
+            "https://sdgny.sharepoint.com/sites/sharedadmin",
+            "https://sdgny.sharepoint.com"
+        ]
+        
+        # Extract tenant name from the SharePoint URL
+        tenant_name = "sdgny"  # From sdgny.sharepoint.com
+        
+        # Try multiple authentication methods
+        last_error = None
+        
+        # Method 1: Try using ClientCredential directly
+        for site_url in site_urls:
             try:
-                site_url = "https://sdgny.sharepoint.com"
-                print(f"Trying alternate site URL: {site_url}")
-                
-                # Create authentication context for root site
-                auth_context = AuthenticationContext(site_url)
-                auth_context.acquire_token_for_app(client_id=client_id, client_secret=client_secret)
-                
-                # Create client context with the authentication context
-                ctx = ClientContext(site_url, auth_context)
+                print(f"\nMethod 1: Attempting to connect to {site_url} using ClientCredential")
+                client_credentials = ClientCredential(client_id, client_secret)
+                ctx = ClientContext(site_url).with_credentials(client_credentials)
+                ctx.request_form_digest = False  # Disable form digest
                 
                 # Test the connection
                 web = ctx.web
@@ -62,11 +50,62 @@ def get_sharepoint_context():
                 
                 print(f"Successfully connected to SharePoint site: {web.properties['Title']}")
                 return ctx, None
+            except Exception as e:
+                last_error = str(e)
+                print(f"Method 1 error for {site_url}: {last_error}")
+        
+        # Method 2: Try using AuthenticationContext
+        for site_url in site_urls:
+            try:
+                print(f"\nMethod 2: Attempting to connect to {site_url} using AuthenticationContext")
+                auth_context = AuthenticationContext(url=site_url)
+                auth_context.acquire_token_for_app(client_id=client_id, client_secret=client_secret)
                 
-            except Exception as e2:
-                error_msg = str(e2)
-                print(f"Error connecting to {site_url}: {error_msg}")
-                return None, f"SharePoint authentication error: {error_msg}"
+                ctx = ClientContext(site_url, auth_context)
+                ctx.request_form_digest = False  # Disable form digest
+                
+                # Test the connection
+                web = ctx.web
+                ctx.load(web)
+                ctx.execute_query()
+                
+                print(f"Successfully connected to SharePoint site: {web.properties['Title']}")
+                return ctx, None
+            except Exception as e:
+                last_error = str(e)
+                print(f"Method 2 error for {site_url}: {last_error}")
+        
+        # Method 3: Try using tenant URL for authentication but site URL for context
+        tenant_url = f"https://{tenant_name}.sharepoint.com"
+        for site_url in site_urls:
+            try:
+                print(f"\nMethod 3: Authenticating with {tenant_url}, connecting to {site_url}")
+                auth_context = AuthenticationContext(url=tenant_url)
+                auth_context.acquire_token_for_app(client_id=client_id, client_secret=client_secret)
+                
+                ctx = ClientContext(site_url, auth_context)
+                ctx.request_form_digest = False  # Disable form digest
+                
+                # Test the connection
+                web = ctx.web
+                ctx.load(web)
+                ctx.execute_query()
+                
+                print(f"Successfully connected to SharePoint site: {web.properties['Title']}")
+                return ctx, None
+            except Exception as e:
+                last_error = str(e)
+                print(f"Method 3 error for {site_url}: {last_error}")
+        
+        # If we get here, all attempts failed
+        print("\nAll authentication methods failed. Please check:")
+        print("1. Client ID and Client Secret are correct")
+        print("2. App registration has proper SharePoint permissions")
+        print("3. Admin consent has been granted for the permissions")
+        print("4. The site URL is correct and accessible")
+        
+        return None, f"SharePoint authentication error: {last_error}"
+    
     except Exception as e:
         print(f"General error: {str(e)}")
         return None, f"SharePoint authentication error: {str(e)}"
