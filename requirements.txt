@@ -6,3 +6,4 @@ gitpython
 pyodbc==5.2.0    # For Azure SQL Database connectivity
 azure-identity    # For Azure authentication
 Office365-REST-Python-Client==2.5.5  # For SharePoint integration
+msal==1.26.0     # Microsoft Authentication Library for SharePoint app-only auth

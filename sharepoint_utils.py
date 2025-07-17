@@ -1,11 +1,13 @@
 import os
 import streamlit as st
-from office365.runtime.auth.client_credential import ClientCredential
+import requests
+import msal
+from office365.runtime.auth.token_response import TokenResponse
 from office365.sharepoint.client_context import ClientContext
 from office365.sharepoint.files.file import File
 
 def get_sharepoint_context():
-    """Get SharePoint client context using Azure AD App-Only authentication"""
+    """Get SharePoint client context using Azure AD App-Only authentication with MSAL"""
     try:
         # Check if SharePoint app credentials exist in Streamlit secrets
         if "SHAREPOINT_CLIENT_ID" not in st.secrets or "SHAREPOINT_CLIENT_SECRET" not in st.secrets:
@@ -15,47 +17,53 @@ def get_sharepoint_context():
         client_id = st.secrets["SHAREPOINT_CLIENT_ID"]
         client_secret = st.secrets["SHAREPOINT_CLIENT_SECRET"]
         
-        # Try different SharePoint site URLs
-        # First try the tenant root site
-        site_url = "https://sdgny.sharepoint.com"
+        # Extract tenant name from the SharePoint URL
+        tenant_name = "sdgny"  # Extracted from sdgny.sharepoint.com
+        tenant_id = f"{tenant_name}.onmicrosoft.com"
+        site_url = "https://sdgny.sharepoint.com/sites/sharedadmin"
         
-        # Print debug information
         print(f"Attempting to connect to SharePoint with client ID: {client_id[:5]}...")
         print(f"Site URL: {site_url}")
         
         try:
-            # Create client credentials and client context
-            client_credentials = ClientCredential(client_id, client_secret)
-            ctx = ClientContext(site_url).with_credentials(client_credentials)
+            # Configure MSAL app
+            authority = f"https://login.microsoftonline.com/{tenant_id}"
+            scope = ["https://sdgny.sharepoint.com/.default"]
             
-            # Test the connection by getting the web title
-            web = ctx.web
-            ctx.load(web)
-            ctx.execute_query()
+            # Create a confidential client application
+            app = msal.ConfidentialClientApplication(
+                client_id=client_id,
+                client_credential=client_secret,
+                authority=authority
+            )
             
-            print(f"Successfully connected to SharePoint site: {web.properties['Title']}")
-            return ctx, None
-        except Exception as e:
-            error_msg = str(e)
-            print(f"Error connecting to {site_url}: {error_msg}")
+            # Acquire token for the app (client credentials flow)
+            result = app.acquire_token_for_client(scopes=scope)
             
-            # Try the specific site collection as fallback
-            site_url = "https://sdgny.sharepoint.com/sites/sharedadmin"
-            print(f"Trying alternate site URL: {site_url}")
-            
-            try:
-                client_credentials = ClientCredential(client_id, client_secret)
-                ctx = ClientContext(site_url).with_credentials(client_credentials)
+            if "access_token" in result:
+                print("Successfully acquired token")
+                access_token = result["access_token"]
+                
+                # Create a client context with the access token
+                ctx = ClientContext(site_url)
+                ctx.auth_context.set_access_token(access_token)
+                
+                # Test the connection by getting the web title
                 web = ctx.web
                 ctx.load(web)
                 ctx.execute_query()
                 
                 print(f"Successfully connected to SharePoint site: {web.properties['Title']}")
                 return ctx, None
-            except Exception as e2:
-                error_msg = str(e2)
-                print(f"Error connecting to {site_url}: {error_msg}")
+            else:
+                error_msg = result.get("error_description", "Unknown error")
+                print(f"Error acquiring token: {error_msg}")
                 return None, f"SharePoint authentication error: {error_msg}"
+                
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Error connecting to {site_url}: {error_msg}")
+            return None, f"SharePoint authentication error: {error_msg}"
     except Exception as e:
         print(f"General error: {str(e)}")
         return None, f"SharePoint authentication error: {str(e)}"
