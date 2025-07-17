@@ -735,10 +735,7 @@ def upload_images_tab():
     if st.session_state.form_submitted:
         # Reset the flag
         st.session_state.form_submitted = False
-        # Show a temporary success message
-        st.success("Images sent successfully! Form has been reset.")
-        # Force a rerun with clean state
-        time.sleep(1)  # Give user time to see the message
+        # Force a rerun with clean state - no message about form reset
         st.rerun()
     
     st.header("Upload Images")
@@ -818,7 +815,7 @@ def upload_images_tab():
                             st.warning(f"Could not send Slack notification: {e}")
                     
                     # Force a rerun to reset the form immediately
-                    time.sleep(1.5)  # Give user time to see the success message
+                    time.sleep(1)  # Give user time to see the success message
                     st.rerun()
                 else:
                     st.error("Failed to send email. Please check the logs.")
