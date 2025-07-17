@@ -247,6 +247,27 @@ def get_projects_from_db():
     except Exception as e:
         st.error(f"Error reading from database: {str(e)}")
         return pd.DataFrame(columns=['Project ID', 'Email ID link'])
+        
+def get_all_project_ids():
+    """Get all project IDs from the database for autocomplete"""
+    try:
+        conn, error = get_db_connection()
+        if error:
+            return []
+            
+        # Query the database for project IDs only
+        query = "SELECT ProjectNumber FROM dbo.ProcoreProjectData ORDER BY ProjectNumber"
+        cursor = conn.cursor()
+        cursor.execute(query)
+        
+        # Extract project IDs from the result
+        project_ids = [row[0] for row in cursor.fetchall()]
+        
+        cursor.close()
+        conn.close()
+        return project_ids
+    except Exception as e:
+        return []
 
 def get_email_for_project(project_id):
     """Get email for a specific project ID"""
@@ -722,8 +743,26 @@ def upload_images_tab():
     
     st.header("Upload Images")
     
-    # Project ID input with dynamic key
-    project_id = st.text_input("Project ID", placeholder="Enter the Project ID", key=project_id_key)
+    # Get all project IDs for autocomplete
+    all_project_ids = get_all_project_ids()
+    
+    # Project ID input with autocomplete
+    if all_project_ids:
+        # Add an empty option at the beginning
+        project_id_options = [""]
+        project_id_options.extend(all_project_ids)
+        
+        # Use selectbox with autocomplete
+        project_id = st.selectbox(
+            "Project ID",
+            options=project_id_options,
+            key=project_id_key,
+            placeholder="Select or type to search Project ID",
+            index=0  # Default to empty option
+        )
+    else:
+        # Fallback to regular text input if no project IDs are available
+        project_id = st.text_input("Project ID", placeholder="Enter the Project ID", key=project_id_key)
     
     # Status dropdown with dynamic key
     status_options = ["PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
