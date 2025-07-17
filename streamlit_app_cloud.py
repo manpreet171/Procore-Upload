@@ -816,6 +816,10 @@ def upload_images_tab():
                             requests.post(SLACK_WEBHOOK_URL, json=slack_message)
                         except Exception as e:
                             st.warning(f"Could not send Slack notification: {e}")
+                    
+                    # Force a rerun to reset the form immediately
+                    time.sleep(1.5)  # Give user time to see the success message
+                    st.rerun()
                 else:
                     st.error("Failed to send email. Please check the logs.")
                     
