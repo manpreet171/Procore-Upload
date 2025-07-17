@@ -765,8 +765,8 @@ def upload_images_tab():
         project_id = st.text_input("Project ID", placeholder="Enter the Project ID", key=project_id_key)
     
     # Status dropdown with dynamic key
-    status_options = ["PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
-    status = st.selectbox("Status", options=status_options, key=status_key)
+    status_options = ["", "PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
+    status = st.selectbox("Status", options=status_options, key=status_key, index=0)  # Default to blank option
     
     # File upload with dynamic key
     uploaded_files = st.file_uploader(
