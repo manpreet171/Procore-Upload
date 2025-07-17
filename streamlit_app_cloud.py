@@ -147,25 +147,18 @@ def send_email(recipient_email, subject, body, attachments=None):
 def get_db_connection():
     """Create a connection to the Azure SQL database with enhanced error handling"""
     try:
-        st.sidebar.info(f"Attempting to connect to: {DB_SERVER}/{DB_NAME} using driver: {DB_DRIVER}")
         conn_str = f"DRIVER={DB_DRIVER};SERVER={DB_SERVER};DATABASE={DB_NAME};UID={DB_USERNAME};PWD={DB_PASSWORD};Connection Timeout=30;"
         conn = pyodbc.connect(conn_str)
         conn.setdecoding(pyodbc.SQL_CHAR, encoding='utf-8')
         conn.setdecoding(pyodbc.SQL_WCHAR, encoding='utf-8')
         conn.setencoding(encoding='utf-8')
-        st.sidebar.success(f"Successfully connected to {DB_SERVER}/{DB_NAME}")
         return conn, None
     except pyodbc.Error as e:
         error_code = e.args[0] if len(e.args) > 0 else "Unknown"
-        error_message = f"Database connection error [{error_code}]: {str(e)}"
-        st.sidebar.error(error_message)
-        st.sidebar.error(f"Driver: {DB_DRIVER}, Server: {DB_SERVER}, DB: {DB_NAME}")
-        st.sidebar.info("Check if the ODBC driver is installed and the server allows connections from this IP")
+        error_message = f"Database error: {str(e)}"
         return None, error_message
     except Exception as e:
-        error_message = f"Unexpected database error: {str(e)}"
-        st.sidebar.error(error_message)
-        st.sidebar.info(f"Platform: {os.name}, Python: {sys.version}")
+        error_message = f"Unexpected error: {str(e)}"
         return None, error_message
 
 # Initialize database tables if needed
@@ -183,23 +176,21 @@ def test_database_connection():
         cursor.close()
         conn.close()
         
-        return True, f"Connected to SQL Server: {version[:30]}..."
+        return True, "Connected to database"
     except Exception as e:
-        return False, f"Error connecting to database: {str(e)}"
+        return False, f"Database connection error: {str(e)}"
 
 def init_database():
     """Initialize database tables if they don't exist"""
     try:
         # Display database connection status in sidebar
         with st.sidebar:
-            with st.spinner("Connecting to database..."):
-                conn, error = get_db_connection()
-                if error:
-                    st.error("❌ Database connection failed")
-                    st.error(error)
-                    return False
-                else:
-                    st.success("✅ Connected to Azure SQL Database")
+            conn, error = get_db_connection()
+            if error:
+                st.error("❌ Database connection failed")
+                return False
+            else:
+                st.success("✅ Connected to database")
             
         cursor = conn.cursor()
         
