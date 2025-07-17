@@ -876,15 +876,29 @@ def upload_images_tab():
 def manage_projects_tab():
     st.header("Project Management")
     
-    # Password protection
-    password = st.text_input("Enter admin password", type="password")
-    if not password:
-        st.warning("Please enter the admin password to access project management")
-        return
+    # Initialize authentication state if not already set
+    if 'admin_authenticated' not in st.session_state:
+        st.session_state.admin_authenticated = False
     
-    if not verify_password(password):
-        st.error("Incorrect password")
-        return
+    # Show password input only if not authenticated
+    if not st.session_state.admin_authenticated:
+        password = st.text_input("Enter admin password", type="password")
+        if password:
+            if verify_password(password):
+                st.session_state.admin_authenticated = True
+                st.rerun()  # Rerun to refresh the UI
+            else:
+                st.error("Incorrect password")
+                return
+        else:
+            st.warning("Please enter the admin password to access project management")
+            return
+    
+    # Add logout button in the sidebar
+    with st.sidebar:
+        if st.button("Logout from Admin"):
+            st.session_state.admin_authenticated = False
+            st.rerun()
     
     # Show tabs for different management functions
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Add Project", "Edit Project", "Delete Project", "Bulk Import", "View Projects", "Change History"])
