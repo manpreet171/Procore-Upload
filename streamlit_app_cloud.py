@@ -738,7 +738,7 @@ def upload_images_tab():
         # Show a temporary success message
         st.success("Images sent successfully! Form has been reset.")
         # Force a rerun with clean state
-        time.sleep(1.5)  # Give user time to see the message
+        time.sleep(1)  # Give user time to see the message
         st.rerun()
     
     st.header("Upload Images")
