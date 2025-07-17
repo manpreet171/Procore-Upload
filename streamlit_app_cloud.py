@@ -887,7 +887,7 @@ def manage_projects_tab():
         return
     
     # Show tabs for different management functions
-    tab1, tab2, tab3, tab4 = st.tabs(["Add Project", "Edit Project", "Delete Project", "Bulk Import"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Add Project", "Edit Project", "Delete Project", "Bulk Import", "View Projects", "Change History"])
     
     with tab1:
         st.subheader("Add New Project")
@@ -970,51 +970,53 @@ def manage_projects_tab():
                     st.success(message)
                 else:
                     st.error(message)
+    
+    with tab5:
+        st.subheader("View Projects")
+        
+        # Get all projects from database
+        projects_df = get_projects_from_db()
+        
+        if projects_df.empty:
+            st.warning("No projects found")
+        else:
+            # Display projects in a table
+            st.dataframe(projects_df, use_container_width=True)
+            
+            # Download option
+            csv_data = projects_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download Projects CSV",
+                data=csv_data,
+                file_name="projects.csv",
+                mime="text/csv"
+            )
+    
+    with tab6:
+        st.subheader("Change History")
+        
+        # Get change history from database
+        logs_df = get_change_history()
+        
+        if logs_df.empty:
+            st.warning("No change history found")
+        else:
+            # Format timestamp for better display
+            logs_df['timestamp'] = pd.to_datetime(logs_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Display logs in a table
+            st.dataframe(logs_df, use_container_width=True)
+            
+            # Download option
+            csv_data = logs_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download Change History CSV",
+                data=csv_data,
+                file_name="change_history.csv",
+                mime="text/csv"
+            )
 
-def view_projects_tab():
-    st.header("View Projects")
-    
-    # Get all projects from database
-    projects_df = get_projects_from_db()
-    
-    if projects_df.empty:
-        st.warning("No projects found")
-    else:
-        # Display projects in a table
-        st.dataframe(projects_df, use_container_width=True)
-        
-        # Download option
-        csv_data = projects_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download Projects CSV",
-            data=csv_data,
-            file_name="projects.csv",
-            mime="text/csv"
-        )
-
-def view_logs_tab():
-    st.header("Change History")
-    
-    # Get change history from database
-    logs_df = get_change_history()
-    
-    if logs_df.empty:
-        st.warning("No change history found")
-    else:
-        # Format timestamp for better display
-        logs_df['timestamp'] = pd.to_datetime(logs_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Display logs in a table
-        st.dataframe(logs_df, use_container_width=True)
-        
-        # Download option
-        csv_data = logs_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download Change History CSV",
-            data=csv_data,
-            file_name="change_history.csv",
-            mime="text/csv"
-        )
+# Note: view_projects_tab and view_logs_tab functions have been integrated into the manage_projects_tab function
 
 def main():
     st.title("Project Image Upload System")
@@ -1033,19 +1035,13 @@ def main():
     init_database()
     
     # Create tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["Upload Images", "Manage Projects", "View Projects", "Change History"])
+    tab1, tab2 = st.tabs(["Upload Images", "Manage Projects"])
     
     with tab1:
         upload_images_tab()
     
     with tab2:
         manage_projects_tab()
-        
-    with tab3:
-        view_projects_tab()
-        
-    with tab4:
-        view_logs_tab()
 
 if __name__ == "__main__":
     main()
