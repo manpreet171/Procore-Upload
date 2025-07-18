@@ -934,7 +934,7 @@ def shopify_upload_tab():
             st.info(f"Customer: **{customer_name}**")
             
             # Status selection with dynamic key
-            status_options = ["PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
+            status_options = ["", "PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
             selected_status = st.selectbox(
                 "Select Status",
                 options=status_options,
