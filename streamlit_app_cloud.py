@@ -118,6 +118,7 @@ def verify_password(password):
     return password == ADMIN_PASSWORD
 
 # SharePoint Helper Functions
+@st.cache_data(ttl=3500)  # Cache token for ~58 minutes (tokens usually last 60 minutes)
 def get_sharepoint_access_token():
     """Get access token for SharePoint using client credentials flow"""
     try:
@@ -125,21 +126,19 @@ def get_sharepoint_access_token():
             return None, "SharePoint credentials not configured"
             
         app = msal.ConfidentialClientApplication(
-            SHAREPOINT_CLIENT_ID,
-            authority=SHAREPOINT_AUTHORITY,
+            client_id=SHAREPOINT_CLIENT_ID,
             client_credential=SHAREPOINT_CLIENT_SECRET,
+            authority=f"https://login.microsoftonline.com/{SHAREPOINT_TENANT_ID}"
         )
         
-        result = app.acquire_token_for_client(scopes=SHAREPOINT_SCOPES)
+        result = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
         
         if "access_token" in result:
             return result["access_token"], None
         else:
-            error_msg = result.get('error_description', 'Unknown authentication error')
-            return None, f"Authentication failed: {error_msg}"
-            
+            return None, f"Error getting token: {result.get('error_description', 'Unknown error')}"
     except Exception as e:
-        return None, f"Error getting access token: {str(e)}"
+        return None, f"Error in authentication: {str(e)}"
 
 def get_shopify_orders_drive_id(token):
     """Get the drive ID for the Shopify_orders_photos library"""
@@ -195,6 +194,7 @@ def create_sharepoint_folder(token, drive_id, parent_folder_id, folder_name):
     except Exception as e:
         return None, f"Error creating folder: {str(e)}"
 
+@st.cache_data(ttl=300)  # Cache folder paths for 5 minutes
 def get_or_create_folder_path(token, drive_id, folder_path):
     """Get or create a folder path in SharePoint (e.g., 'CustomerName/Status/OrderID')"""
     try:
@@ -267,12 +267,19 @@ def upload_file_to_sharepoint(token, drive_id, folder_id, file_path, file_name):
     except Exception as e:
         return None, f"Error uploading file: {str(e)}"
 
+@st.cache_data(ttl=60)  # Cache for 1 minute to avoid duplicate uploads
 def upload_file_content_to_sharepoint(token, drive_id, folder_id, file_name, file_content):
     """Upload file content directly to SharePoint"""
     try:
         headers = {
             'Authorization': f'Bearer {token}',
         }
+        
+        # Check if it's an image file that can be optimized
+        file_ext = os.path.splitext(file_name)[1].lower()
+        if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
+            # Optimize image before uploading
+            file_content = optimize_image(file_content)
         
         # Upload file
         if folder_id == "root":
@@ -410,12 +417,11 @@ def init_database():
         return True
     except Exception as e:
         st.sidebar.error(f"Error initializing database: {str(e)}")
-        return False
-
-# Database is the only storage mechanism - Git operations removed
 
 # Database operations
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_projects_from_db():
+    """Get all projects from the database"""
     try:
         conn, error = get_db_connection()
         if error:
@@ -431,6 +437,7 @@ def get_projects_from_db():
         st.error(f"Error reading from database: {str(e)}")
         return pd.DataFrame(columns=['Project ID', 'Email ID link'])
         
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_all_project_ids():
     """Get all project IDs from the database for autocomplete"""
     try:
@@ -452,271 +459,7 @@ def get_all_project_ids():
     except Exception as e:
         return []
 
-def get_email_for_project(project_id):
-    """Get email for a specific project ID"""
-    try:
-        # Add debug info to sidebar
-        st.sidebar.markdown("### Email Lookup Debug")
-        st.sidebar.write(f"Looking up email for Project ID: {project_id}")
-        
-        conn, error = get_db_connection()
-        if error:
-            st.error(error)
-            st.sidebar.error(f"Database connection error when looking up email")
-            return None
-            
-        cursor = conn.cursor()
-        query = "SELECT ProcorePhotoEmail FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?"
-        st.sidebar.write(f"Query: {query} with param: {str(project_id)}")
-        
-        cursor.execute(query, str(project_id))
-        result = cursor.fetchone()
-        
-        if not result:
-            st.sidebar.warning(f"No email found for Project ID: {project_id}")
-            return None
-            
-        email = result[0]
-        st.sidebar.success(f"Found email: {email}")
-        conn.close()
-        return email
-    except Exception as e:
-        st.error(f"Error getting email for project: {e}")
-        st.sidebar.error(f"Exception: {str(e)}")
-        return None
-
-def add_project_to_db(project_id, email):
-    """Add a new project to the database"""
-    try:
-        conn, error = get_db_connection()
-        if error:
-            return False, error
-            
-        cursor = conn.cursor()
-        project_id_str = str(project_id)
-        
-        # Check if project already exists
-        cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", project_id_str)
-        count = cursor.fetchone()[0]
-        if count > 0:
-            cursor.close()
-            conn.close()
-            return False, "Project ID already exists"
-        
-        # Add new project with minimal required fields
-        cursor.execute("""
-        INSERT INTO dbo.ProcoreProjectData 
-        (ProjectNumber, ProjectName, ProcorePhotoEmail) 
-        VALUES (?, ?, ?)
-        """, project_id_str, f"Project {project_id_str}", email)
-        
-        # Log the change
-        log_change("add", project_id_str, f"Added project with email: {email}")
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return True, "Project added successfully"
-    except Exception as e:
-        return False, f"Error adding project: {str(e)}"
-
-def edit_project_in_db(old_project_id, new_project_id, new_email):
-    """Edit an existing project in the database"""
-    try:
-        conn, error = get_db_connection()
-        if error:
-            return False, error
-            
-        cursor = conn.cursor()
-        old_project_id_str = str(old_project_id)
-        new_project_id_str = str(new_project_id)
-        
-        # Check if old project exists
-        cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", old_project_id_str)
-        count = cursor.fetchone()[0]
-        if count == 0:
-            cursor.close()
-            conn.close()
-            return False, "Project ID does not exist"
-        
-        # Check if new project ID already exists (unless it's the same as old)
-        if old_project_id_str != new_project_id_str:
-            cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", new_project_id_str)
-            count = cursor.fetchone()[0]
-            if count > 0:
-                cursor.close()
-                conn.close()
-                return False, "New Project ID already exists"
-            
-            # Update the project ID and email
-            cursor.execute("""
-            UPDATE dbo.ProcoreProjectData 
-            SET ProjectNumber = ?, ProjectName = ?, ProcorePhotoEmail = ? 
-            WHERE ProjectNumber = ?
-            """, new_project_id_str, f"Project {new_project_id_str}", new_email, old_project_id_str)
-        else:
-            # Update just the email
-            cursor.execute("""
-            UPDATE dbo.ProcoreProjectData 
-            SET ProcorePhotoEmail = ? 
-            WHERE ProjectNumber = ?
-            """, new_email, old_project_id_str)
-        
-        # Log the change
-        log_change("edit", new_project_id_str, f"Updated project from {old_project_id_str} to {new_project_id_str} with email: {new_email}")
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return True, "Project updated successfully"
-    except Exception as e:
-        return False, f"Error editing project: {str(e)}"
-
-def delete_project_from_db(project_id):
-    """Delete a project from the database"""
-    try:
-        conn, error = get_db_connection()
-        if error:
-            return False, error
-            
-        cursor = conn.cursor()
-        project_id_str = str(project_id)
-        
-        # Check if project exists and get email for logging
-        cursor.execute("SELECT ProcorePhotoEmail FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", project_id_str)
-        result = cursor.fetchone()
-        if not result:
-            cursor.close()
-            conn.close()
-            return False, "Project ID does not exist"
-            
-        email = result[0]
-        
-        # Delete the project
-        cursor.execute("DELETE FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", project_id_str)
-        
-        # Log the change
-        log_change("delete", project_id_str, f"Deleted project with email: {email}")
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return True, "Project deleted successfully"
-    except Exception as e:
-        return False, f"Error deleting project: {str(e)}"
-
-def bulk_import_projects(file):
-    """Import multiple projects from an Excel or CSV file"""
-    try:
-        # Read the uploaded file
-        if file.name.endswith('.csv'):
-            import_df = pd.read_csv(file)
-        elif file.name.endswith(('.xls', '.xlsx')):
-            import_df = pd.read_excel(file)
-        else:
-            return False, "Unsupported file format. Please upload a CSV or Excel file."
-        
-        # Check if the file has the required columns
-        required_columns = ['Project ID', 'Email ID link']
-        if not all(col in import_df.columns for col in required_columns):
-            return False, f"File must contain columns: {', '.join(required_columns)}"
-        
-        conn, error = get_db_connection()
-        if error:
-            return False, error
-            
-        cursor = conn.cursor()
-        
-        # Convert project IDs to strings
-        import_df['Project ID'] = import_df['Project ID'].astype(str)
-        
-        # Track results
-        added = 0
-        skipped = 0
-        
-        # Process each row
-        for _, row in import_df.iterrows():
-            project_id = str(row['Project ID'])
-            email = row['Email ID link']
-            
-            # Check if project already exists
-            cursor.execute("SELECT COUNT(*) FROM dbo.ProcoreProjectData WHERE ProjectNumber = ?", project_id)
-            count = cursor.fetchone()[0]
-            
-            if count > 0:
-                skipped += 1
-                continue
-            
-            # Add new project
-            cursor.execute("""
-            INSERT INTO dbo.ProcoreProjectData 
-            (ProjectNumber, ProjectName, ProcorePhotoEmail) 
-            VALUES (?, ?, ?)
-            """, project_id, f"Project {project_id}", email)
-            added += 1
-            
-            # Log the change
-            log_change("add", project_id, f"Bulk import: Added project with email: {email}")
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return True, f"Import complete: {added} projects added, {skipped} skipped (already exist)"
-    except Exception as e:
-        return False, f"Error importing projects: {str(e)}"
-
-def log_change(action, project_id, details):
-    """Log a change to the change log table in the database"""
-    try:
-        timestamp = datetime.datetime.now()
-        
-        conn, error = get_db_connection()
-        if error:
-            st.error(error)
-            return False
-            
-        cursor = conn.cursor()
-        
-        # Insert the log entry
-        cursor.execute("""
-        INSERT INTO dbo.ChangeLog (ChangeDate, Action, ProjectNumber, Details)
-        VALUES (?, ?, ?, ?)
-        """, timestamp, action, str(project_id), details)
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return True
-    except Exception as e:
-        st.error(f"Error logging change: {str(e)}")
-        return False
-
-def get_change_history():
-    """Get the change history from the change log table in the database"""
-    try:
-        conn, error = get_db_connection()
-        if error:
-            st.error(error)
-            return pd.DataFrame(columns=['timestamp', 'action', 'project_number', 'details'])
-            
-        # Query the database for change history
-        query = "SELECT ChangeDate as timestamp, Action as action, ProjectNumber as project_number, Details as details FROM dbo.ChangeLog ORDER BY ChangeDate DESC"
-        df = pd.read_sql(query, conn)
-        conn.close()
-        return df
-    except Exception as e:
-        st.error(f"Error getting change history: {str(e)}")
-        return pd.DataFrame(columns=['timestamp', 'action', 'project_number', 'details'])
-    
-    # Database is now the source of truth for projects and change logs
-    # No need to create CSV files anymore
-
-# Shopify Database Functions
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_shopify_order_ids():
     """Get all OrderIDs from ShopifyProjectData table for dropdown"""
     try:
@@ -739,6 +482,7 @@ def get_shopify_order_ids():
         st.error(f"Error getting Shopify OrderIDs: {str(e)}")
         return []
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_shopify_customer_by_order(order_id):
     """Get CustomerName for a specific OrderID from ShopifyProjectData"""
     try:
@@ -761,6 +505,7 @@ def get_shopify_customer_by_order(order_id):
         st.error(f"Error getting customer for OrderID {order_id}: {str(e)}")
         return None
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_shopify_projects_from_db():
     """Get all Shopify projects from the database"""
     try:
@@ -778,14 +523,49 @@ def get_shopify_projects_from_db():
         st.error(f"Error retrieving Shopify projects from database: {str(e)}")
         return pd.DataFrame(columns=['OrderID', 'CustomerName', 'Status'])
 
-# Other configuration
-UPLOAD_FOLDER = "uploads"
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-EXCEL_FILE = "project_email.xlsx"
+# ... (rest of the code remains the same)
 
 # Create uploads directory if it doesn't exist
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+    
+# Image optimization function
+def optimize_image(image_data, max_size=1800, quality=85):
+    """Optimize image by resizing and compressing"""
+    try:
+        # Open image from bytes
+        img = Image.open(io.BytesIO(image_data))
+        
+        # Check if resize is needed
+        if max(img.size) > max_size:
+            # Calculate new dimensions while preserving aspect ratio
+            if img.size[0] > img.size[1]:  # Width > Height
+                new_width = max_size
+                new_height = int(img.size[1] * (max_size / img.size[0]))
+            else:  # Height > Width
+                new_height = max_size
+                new_width = int(img.size[0] * (max_size / img.size[1]))
+            
+            # Resize with high quality
+            img = img.resize((new_width, new_height), Image.LANCZOS)
+        
+        # Save to buffer with optimization
+        buffer = io.BytesIO()
+        
+        # Save with format-specific optimizations
+        if img.format == 'JPEG' or img.format == 'JPG':
+            img.save(buffer, format=img.format, quality=quality, optimize=True)
+        elif img.format == 'PNG':
+            img.save(buffer, format=img.format, optimize=True)
+        else:
+            # For other formats, just save with default settings
+            img.save(buffer, format=img.format)
+            
+        buffer.seek(0)
+        return buffer.getvalue()
+    except Exception as e:
+        # If optimization fails, return original data
+        return image_data
     
 # Function to test database connection with retry logic
 def test_database_connection(max_retries=3, retry_delay=2):
@@ -881,9 +661,16 @@ def upload_images_tab():
                     unique_filename = f"{status}_{uuid.uuid4()}{file_extension}"
                     file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
                     
-                    # Save the file
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
+                    # Only optimize images, not PDFs
+                    if file_extension.lower() in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
+                        # Optimize image before saving
+                        optimized_data = optimize_image(uploaded_file.getbuffer())
+                        with open(file_path, "wb") as f:
+                            f.write(optimized_data)
+                    else:
+                        # Save non-image files as-is
+                        with open(file_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
                     
                     saved_files.append(file_path)
                 
