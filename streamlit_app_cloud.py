@@ -1099,8 +1099,74 @@ def shopify_upload_tab():
                 st.info(f"Folder path: **{customer_name}/{selected_status}/{selected_order_id}/**")
                 
                 if st.button("Upload to SharePoint", type="primary"):
-                    # This will be implemented in Chunk 4
-                    st.info("SharePoint upload functionality will be implemented in the next step.")
+                    # Implement SharePoint upload functionality
+                    with st.spinner("Uploading to SharePoint..."):
+                        try:
+                            # Get SharePoint access token
+                            access_token, error = get_sharepoint_access_token()
+                            if error:
+                                st.error(f"Authentication failed: {error}")
+                                return
+                            
+                            # Get the Shopify_orders_photos drive ID
+                            drive_id, error = get_shopify_orders_drive_id(access_token)
+                            if error:
+                                st.error(f"Failed to access SharePoint drive: {error}")
+                                return
+                            
+                            # Create folder path: CustomerName/Status/OrderID
+                            folder_path = f"{customer_name}/{selected_status}/{selected_order_id}"
+                            folder_id, error = get_or_create_folder_path(access_token, drive_id, folder_path)
+                            if error:
+                                st.error(f"Failed to create folder structure: {error}")
+                                return
+                            
+                            # Upload each file
+                            upload_results = []
+                            progress_bar = st.progress(0)
+                            
+                            for i, uploaded_file in enumerate(uploaded_files):
+                                # Update progress
+                                progress = (i + 1) / len(uploaded_files)
+                                progress_bar.progress(progress)
+                                
+                                # Upload file to SharePoint
+                                file_content = uploaded_file.getvalue()
+                                success, error = upload_file_to_sharepoint(
+                                    access_token, 
+                                    drive_id, 
+                                    folder_id, 
+                                    uploaded_file.name, 
+                                    file_content
+                                )
+                                
+                                if success:
+                                    upload_results.append(f"✅ {uploaded_file.name}")
+                                else:
+                                    upload_results.append(f"❌ {uploaded_file.name}: {error}")
+                            
+                            # Show results
+                            progress_bar.empty()
+                            
+                            successful_uploads = [r for r in upload_results if r.startswith("✅")]
+                            failed_uploads = [r for r in upload_results if r.startswith("❌")]
+                            
+                            if successful_uploads:
+                                st.success(f"Successfully uploaded {len(successful_uploads)} file(s) to SharePoint!")
+                                st.markdown("**Uploaded files:**")
+                                for result in successful_uploads:
+                                    st.markdown(f"- {result}")
+                                
+                                st.info(f"📁 Files saved to: `Shopify_orders_photos/{folder_path}/`")
+                            
+                            if failed_uploads:
+                                st.error(f"Failed to upload {len(failed_uploads)} file(s):")
+                                for result in failed_uploads:
+                                    st.markdown(f"- {result}")
+                            
+                        except Exception as e:
+                            st.error(f"Unexpected error during upload: {str(e)}")
+                            st.exception(e)
         else:
             st.error(f"Customer not found for OrderID: {selected_order_id}")
     
