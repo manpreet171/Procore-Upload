@@ -18,7 +18,6 @@ from PIL import Image
 import pyodbc
 import urllib.parse
 import msal
-import math
 
 # Set page configuration
 st.set_page_config(
@@ -119,7 +118,6 @@ def verify_password(password):
     return password == ADMIN_PASSWORD
 
 # SharePoint Helper Functions
-@st.cache_data(ttl=3300)  # Cache for 55 minutes (tokens usually last 60 minutes)
 def get_sharepoint_access_token():
     """Get access token for SharePoint using client credentials flow"""
     try:
@@ -143,7 +141,6 @@ def get_sharepoint_access_token():
     except Exception as e:
         return None, f"Error getting access token: {str(e)}"
 
-@st.cache_data(ttl=86400)  # Cache for 24 hours as drive IDs rarely change
 def get_shopify_orders_drive_id(token):
     """Get the drive ID for the Shopify_orders_photos library"""
     try:
@@ -198,7 +195,6 @@ def create_sharepoint_folder(token, drive_id, parent_folder_id, folder_name):
     except Exception as e:
         return None, f"Error creating folder: {str(e)}"
 
-@st.cache_data(ttl=3600)  # Cache folder paths for 1 hour
 def get_or_create_folder_path(token, drive_id, folder_path):
     """Get or create a folder path in SharePoint (e.g., 'CustomerName/Status/OrderID')"""
     try:
@@ -329,87 +325,15 @@ def send_email(recipient_email, subject, body, attachments=None):
         st.error(f"Error sending email: {str(e)}")
         return False
 
-# Image optimization function
-def optimize_image(image_content, max_size_kb=500, quality=85):
-    """Optimize image to reduce file size while maintaining reasonable quality"""
-    try:
-        # Open image from bytes
-        img = Image.open(io.BytesIO(image_content))
-        
-        # Initial quality setting
-        current_quality = quality
-        output = io.BytesIO()
-        
-        # Save as JPEG with quality setting
-        if img.mode in ('RGBA', 'LA'):
-            # Convert transparent images to RGB with white background
-            background = Image.new('RGB', img.size, (255, 255, 255))
-            background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
-            img = background
-        
-        # First attempt at compression
-        img.save(output, format='JPEG', quality=current_quality, optimize=True)
-        
-        # Check if size is still too large and reduce quality if needed
-        while output.tell() > max_size_kb * 1024 and current_quality > 30:
-            output = io.BytesIO()
-            current_quality -= 10
-            img.save(output, format='JPEG', quality=current_quality, optimize=True)
-        
-        # If still too large, resize the image
-        if output.tell() > max_size_kb * 1024:
-            # Calculate new dimensions to maintain aspect ratio
-            ratio = math.sqrt(max_size_kb * 1024 / output.tell())
-            new_width = int(img.width * ratio)
-            new_height = int(img.height * ratio)
-            img = img.resize((new_width, new_height), Image.LANCZOS)
-            
-            # Try saving again
-            output = io.BytesIO()
-            img.save(output, format='JPEG', quality=current_quality, optimize=True)
-        
-        output.seek(0)
-        return output.getvalue()
-    except Exception as e:
-        # If optimization fails, return original content
-        return image_content
-
 # Database connection function
-# Database connection pool for reuse
-DB_CONNECTION_POOL = None
-
 def get_db_connection():
-    """Create a connection to the Azure SQL database with connection pooling"""
+    """Create a connection to the Azure SQL database with enhanced error handling"""
     try:
-        global DB_CONNECTION_POOL
-        
-        # If we already have a connection in the pool that's still valid, return it
-        if DB_CONNECTION_POOL is not None:
-            try:
-                # Test if connection is still valid with a simple query
-                cursor = DB_CONNECTION_POOL.cursor()
-                cursor.execute("SELECT 1")
-                cursor.fetchone()
-                cursor.close()
-                return DB_CONNECTION_POOL, None
-            except Exception:
-                # Connection is no longer valid, create a new one
-                try:
-                    DB_CONNECTION_POOL.close()
-                except:
-                    pass
-                DB_CONNECTION_POOL = None
-        
-        # Create a new connection
         conn_str = f"DRIVER={DB_DRIVER};SERVER={DB_SERVER};DATABASE={DB_NAME};UID={DB_USERNAME};PWD={DB_PASSWORD};Connection Timeout=30;"
         conn = pyodbc.connect(conn_str)
         conn.setdecoding(pyodbc.SQL_CHAR, encoding='utf-8')
         conn.setdecoding(pyodbc.SQL_WCHAR, encoding='utf-8')
         conn.setencoding(encoding='utf-8')
-        
-        # Store in pool for future use
-        DB_CONNECTION_POOL = conn
-        
         return conn, None
     except pyodbc.Error as e:
         error_code = e.args[0] if len(e.args) > 0 else "Unknown"
@@ -507,7 +431,6 @@ def get_projects_from_db():
         st.error(f"Error reading from database: {str(e)}")
         return pd.DataFrame(columns=['Project ID', 'Email ID link'])
         
-@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_all_project_ids():
     """Get all project IDs from the database for autocomplete"""
     try:
@@ -736,7 +659,7 @@ def bulk_import_projects(file):
             added += 1
             
             # Log the change
-            log_change("add", project_id, f"Added project with email: {email} (bulk import)")
+            log_change("add", project_id, f"Bulk import: Added project with email: {email}")
         
         conn.commit()
         cursor.close()
@@ -749,36 +672,143 @@ def bulk_import_projects(file):
 def log_change(action, project_id, details):
     """Log a change to the change log table in the database"""
     try:
+        timestamp = datetime.datetime.now()
+        
         conn, error = get_db_connection()
         if error:
             st.error(error)
             return False
             
         cursor = conn.cursor()
-        now = datetime.datetime.now()
         
-        try:
-            # Insert into change log
-            cursor.execute("""
-            INSERT INTO dbo.ChangeLog 
-            (Action, ProjectNumber, Details, ChangeDate) 
-            VALUES (?, ?, ?, ?)
-            """, action, str(project_id), details, now)
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            return True
-        except Exception as e:
-            st.error(f"Error logging change: {str(e)}")
-            return False
+        # Insert the log entry
+        cursor.execute("""
+        INSERT INTO dbo.ChangeLog (ChangeDate, Action, ProjectNumber, Details)
+        VALUES (?, ?, ?, ?)
+        """, timestamp, action, str(project_id), details)
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return True
     except Exception as e:
-        st.error(f"Error preparing database connection: {str(e)}")
+        st.error(f"Error logging change: {str(e)}")
         return False
 
+def get_change_history():
+    """Get the change history from the change log table in the database"""
+    try:
+        conn, error = get_db_connection()
+        if error:
+            st.error(error)
+            return pd.DataFrame(columns=['timestamp', 'action', 'project_number', 'details'])
+            
+        # Query the database for change history
+        query = "SELECT ChangeDate as timestamp, Action as action, ProjectNumber as project_number, Details as details FROM dbo.ChangeLog ORDER BY ChangeDate DESC"
+        df = pd.read_sql(query, conn)
+        conn.close()
+        return df
+    except Exception as e:
+        st.error(f"Error getting change history: {str(e)}")
+        return pd.DataFrame(columns=['timestamp', 'action', 'project_number', 'details'])
+    
+    # Database is now the source of truth for projects and change logs
+    # No need to create CSV files anymore
+
+# Shopify Database Functions
+def get_shopify_order_ids():
+    """Get all OrderIDs from ShopifyProjectData table for dropdown"""
+    try:
+        conn, error = get_db_connection()
+        if error:
+            return []
+            
+        # Query the database for OrderIDs only
+        query = "SELECT DISTINCT OrderID FROM dbo.ShopifyProjectData WHERE OrderID IS NOT NULL ORDER BY OrderID"
+        cursor = conn.cursor()
+        cursor.execute(query)
+        
+        # Extract OrderIDs from the result
+        order_ids = [row[0] for row in cursor.fetchall()]
+        
+        cursor.close()
+        conn.close()
+        return order_ids
+    except Exception as e:
+        st.error(f"Error getting Shopify OrderIDs: {str(e)}")
+        return []
+
+def get_shopify_customer_by_order(order_id):
+    """Get CustomerName for a specific OrderID from ShopifyProjectData"""
+    try:
+        conn, error = get_db_connection()
+        if error:
+            return None
+            
+        cursor = conn.cursor()
+        query = "SELECT CustomerName FROM dbo.ShopifyProjectData WHERE OrderID = ?"
+        cursor.execute(query, str(order_id))
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if result:
+            return result[0]
+        return None
+    except Exception as e:
+        st.error(f"Error getting customer for OrderID {order_id}: {str(e)}")
+        return None
+
+def get_shopify_projects_from_db():
+    """Get all Shopify projects from the database"""
+    try:
+        conn, error = get_db_connection()
+        if error:
+            st.error(error)
+            return pd.DataFrame(columns=['OrderID', 'CustomerName', 'Status'])
+            
+        # Query the database for Shopify projects
+        query = "SELECT OrderID, CustomerName, Status FROM dbo.ShopifyProjectData ORDER BY OrderID"
+        df = pd.read_sql(query, conn)
+        conn.close()
+        return df
+    except Exception as e:
+        st.error(f"Error retrieving Shopify projects from database: {str(e)}")
+        return pd.DataFrame(columns=['OrderID', 'CustomerName', 'Status'])
+
+# Other configuration
+UPLOAD_FOLDER = "uploads"
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+EXCEL_FILE = "project_email.xlsx"
+
+# Create uploads directory if it doesn't exist
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+    
+# Function to test database connection with retry logic
+def test_database_connection(max_retries=3, retry_delay=2):
+    """Test database connection with retry logic"""
+    for attempt in range(1, max_retries + 1):
+        try:
+            conn, error = get_db_connection()
+            if not error:
+                conn.close()
+                return True, None
+            if attempt < max_retries:
+                time.sleep(retry_delay)
+        except Exception as e:
+            if attempt < max_retries:
+                time.sleep(retry_delay)
+    
+    return False, error
+
+def verify_password(password):
+    """Verify if the provided password matches the admin password"""
+    return password == ADMIN_PASSWORD
+
 def upload_images_tab():
-    """Tab for uploading images to Procore projects"""
     # Initialize session state variables if they don't exist
     if 'form_submitted' not in st.session_state:
         st.session_state.form_submitted = False
@@ -847,30 +877,13 @@ def upload_images_tab():
                 saved_files = []
                 for uploaded_file in uploaded_files:
                     # Create a unique filename with status prefix
-                    file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+                    file_extension = os.path.splitext(uploaded_file.name)[1]
                     unique_filename = f"{status}_{uuid.uuid4()}{file_extension}"
                     file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
                     
-                    # Get file content
-                    file_content = uploaded_file.getbuffer()
-                    
-                    # Optimize image if it's an image file (not PDF)
-                    if file_extension not in ['.pdf']:
-                        try:
-                            # Optimize the image to reduce size
-                            optimized_content = optimize_image(file_content, max_size_kb=500)
-                            
-                            # Save the optimized file
-                            with open(file_path, "wb") as f:
-                                f.write(optimized_content)
-                        except Exception as e:
-                            # If optimization fails, save original file
-                            with open(file_path, "wb") as f:
-                                f.write(file_content)
-                    else:
-                        # For PDFs, save as is
-                        with open(file_path, "wb") as f:
-                            f.write(file_content)
+                    # Save the file
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
                     
                     saved_files.append(file_path)
                 
@@ -904,8 +917,167 @@ def upload_images_tab():
                         if os.path.exists(file_path):
                             os.remove(file_path)
 
+def manage_projects_tab():
+    st.header("Project Management")
+    
+    # Initialize authentication state if not already set
+    if 'admin_authenticated' not in st.session_state:
+        st.session_state.admin_authenticated = False
+    
+    # Show password input only if not authenticated
+    if not st.session_state.admin_authenticated:
+        password = st.text_input("Enter admin password", type="password")
+        if password:
+            if verify_password(password):
+                st.session_state.admin_authenticated = True
+                st.rerun()  # Rerun to refresh the UI
+            else:
+                st.error("Incorrect password")
+                return
+        else:
+            st.warning("Please enter the admin password to access project management")
+            return
+    
+    # Add logout button in the sidebar
+    with st.sidebar:
+        if st.button("Logout from Admin"):
+            st.session_state.admin_authenticated = False
+            st.rerun()
+    
+    # Show tabs for different management functions
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Add Project", "Edit Project", "Delete Project", "Bulk Import", "View Projects", "Change History"])
+    
+    with tab1:
+        st.subheader("Add New Project")
+        new_project_id = st.text_input("Project ID", key="new_project_id")
+        new_email = st.text_input("Email", key="new_email")
+        
+        if st.button("Add Project"):
+            if not new_project_id or not new_email:
+                st.error("Please enter both Project ID and Email")
+            else:
+                success, message = add_project_to_db(new_project_id, new_email)
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+    
+    with tab2:
+        st.subheader("Edit Project")
+        
+        # Get all projects
+        projects_df = get_projects_from_db()
+        
+        if projects_df.empty:
+            st.warning("No projects found")
+        else:
+            # Select project to edit
+            project_options = projects_df['Project ID'].astype(str).tolist()
+            selected_project = st.selectbox("Select Project", options=project_options, key="edit_select_project")
+            
+            # Get current email for selected project
+            current_email = projects_df.loc[projects_df['Project ID'].astype(str) == selected_project, 'Email ID link'].iloc[0]
+            
+            # Edit form
+            edited_project_id = st.text_input("Project ID", value=selected_project, key="edited_project_id_input")
+            edited_email = st.text_input("Email", value=current_email, key="edited_email_input")
+            
+            if st.button("Update Project"):
+                success, message = edit_project_in_db(selected_project, edited_project_id, edited_email)
+                if success:
+                    st.success(message)
+                    # Force refresh to show updated data
+                    st.rerun()
+                else:
+                    st.error(message)
+    
+    with tab3:
+        st.subheader("Delete Project")
+        
+        # Get all projects
+        projects_df = get_projects_from_db()
+        
+        if projects_df.empty:
+            st.warning("No projects found")
+        else:
+            # Select project to delete
+            project_options = projects_df['Project ID'].astype(str).tolist()
+            selected_project = st.selectbox("Select Project", options=project_options, key="delete_select_project")
+            
+            if st.button("Delete Project", type="primary", use_container_width=True):
+                # Confirm deletion
+                if st.button("Confirm Deletion", key="confirm_delete", type="primary"):
+                    success, message = delete_project_from_db(selected_project)
+                    if success:
+                        st.success(message)
+                        # Force refresh to show updated data
+                        st.rerun()
+                    else:
+                        st.error(message)
+    
+    with tab4:
+        st.subheader("Bulk Import Projects")
+        st.write("Upload a CSV or Excel file with columns: 'Project ID' and 'Email ID link'")
+        
+        uploaded_file = st.file_uploader("Choose a file", type=["csv", "xlsx", "xls"], key="bulk_import_file")
+        
+        if uploaded_file is not None:
+            if st.button("Import Projects"):
+                success, message = bulk_import_projects(uploaded_file)
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+    
+    with tab5:
+        st.subheader("View Projects")
+        
+        # Get all projects from database
+        projects_df = get_projects_from_db()
+        
+        if projects_df.empty:
+            st.warning("No projects found")
+        else:
+            # Display projects in a table
+            st.dataframe(projects_df, use_container_width=True)
+            
+            # Download option
+            csv_data = projects_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download Projects CSV",
+                data=csv_data,
+                file_name="projects.csv",
+                mime="text/csv"
+            )
+    
+    with tab6:
+        st.subheader("Change History")
+        
+        # Get change history from database
+        logs_df = get_change_history()
+        
+        if logs_df.empty:
+            st.warning("No change history found")
+        else:
+            # Format timestamp for better display
+            logs_df['timestamp'] = pd.to_datetime(logs_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Display logs in a table
+            st.dataframe(logs_df, use_container_width=True)
+            
+            # Download option
+            csv_data = logs_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download Change History CSV",
+                data=csv_data,
+                file_name="change_history.csv",
+                mime="text/csv"
+            )
+
+# Note: view_projects_tab and view_logs_tab functions have been integrated into the manage_projects_tab function
+
 def shopify_upload_tab():
-    """Tab for uploading images to SharePoint for Shopify orders"""
+    """Simple Shopify image upload tab"""
     # Initialize session state variables if they don't exist
     if 'shopify_form_submitted' not in st.session_state:
         st.session_state.shopify_form_submitted = False
@@ -913,7 +1085,7 @@ def shopify_upload_tab():
     # Only generate new form keys when the form is submitted successfully
     # or when the app first loads and keys don't exist
     if 'shopify_form_key_prefix' not in st.session_state or st.session_state.shopify_form_submitted:
-        st.session_state.shopify_form_key_prefix = f"shopify_upload_form_{int(time.time())}"
+        st.session_state.shopify_form_key_prefix = f"shopify_upload_{int(time.time())}"
     
     # Use the stored keys
     order_id_key = f"{st.session_state.shopify_form_key_prefix}_order_id"
@@ -924,141 +1096,128 @@ def shopify_upload_tab():
     if st.session_state.shopify_form_submitted:
         # Reset the flag
         st.session_state.shopify_form_submitted = False
-        # Force a rerun with clean state - no message about form reset
+        # Force a rerun with clean state
         st.rerun()
     
-    st.header("Upload Shopify Order Images")
-    st.markdown("Upload images for Shopify orders to SharePoint")
+    st.header("Shopify Orders - Image Upload")
     
-    # Get all order IDs for autocomplete
-    all_order_ids = get_shopify_order_ids()
+    # Get OrderIDs from database
+    order_ids = get_shopify_order_ids()
     
-    # Order ID input with autocomplete
-    if all_order_ids:
-        # Add an empty option at the beginning
-        order_id_options = [""]
-        order_id_options.extend(all_order_ids)
-        
-        # Use selectbox with autocomplete
-        order_id = st.selectbox(
-            "Order ID",
-            options=order_id_options,
-            key=order_id_key,
-            placeholder="Select or type to search Order ID",
-            index=0  # Default to empty option
-        )
-    else:
-        # Fallback to regular text input if no order IDs are available
-        order_id = st.text_input("Order ID", placeholder="Enter the Order ID", key=order_id_key)
+    if not order_ids:
+        st.warning("No Shopify OrderIDs found in database. Please add some OrderIDs to the ShopifyProjectData table first.")
+        return
     
-    # Show customer name if order ID is selected
-    customer_name = ""
-    if order_id:
-        customer_name = get_shopify_customer_by_order(order_id)
-        if customer_name:
-            st.info(f"Customer: {customer_name}")
-        else:
-            st.warning("No customer found for this Order ID")
-    
-    # Status dropdown with dynamic key
-    status_options = ["", "PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
-    status = st.selectbox("Status", options=status_options, key=status_key, index=0)  # Default to blank option
-    
-    # File upload with dynamic key
-    uploaded_files = st.file_uploader(
-        "Upload Images", 
-        accept_multiple_files=True,
-        type=list(ALLOWED_EXTENSIONS),
-        key=file_uploader_key
+    # OrderID selection with dynamic key
+    selected_order_id = st.selectbox(
+        "Select OrderID",
+        options=[""] + order_ids,
+        index=0,
+        placeholder="Choose an OrderID",
+        key=order_id_key
     )
     
-    # Show folder path preview
-    if customer_name and status and order_id:
-        folder_path = f"{customer_name}/{status}/{order_id}"
-        st.success(f"Files will be uploaded to: {folder_path}")
-    
-    # Only show Upload button if all required fields are filled
-    if order_id and status and customer_name and uploaded_files:
-        if st.button("Upload to SharePoint"):
-            with st.spinner("Authenticating with SharePoint..."):
-                # Get SharePoint access token
-                token, error = get_sharepoint_access_token()
-                if error:
-                    st.error(f"Authentication failed: {error}")
-                else:
-                    # Get drive ID
-                    drive_id, error = get_shopify_orders_drive_id(token)
-                    if error:
-                        st.error(f"Error getting drive ID: {error}")
-                    else:
-                        # Create folder path
-                        folder_path = f"{customer_name}/{status}/{order_id}"
-                        folder_id, error = get_or_create_folder_path(token, drive_id, folder_path)
-                        
-                        if error:
-                            st.error(f"Error creating folder path: {error}")
-                        else:
-                            # Upload files
-                            progress_bar = st.progress(0)
-                            status_text = st.empty()
+    if selected_order_id:
+        # Get customer name for selected order
+        customer_name = get_shopify_customer_by_order(selected_order_id)
+        
+        if customer_name:
+            st.info(f"Customer: **{customer_name}**")
+            
+            # Status selection with dynamic key
+            status_options = ["PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
+            selected_status = st.selectbox(
+                "Select Status",
+                options=status_options,
+                index=0,
+                key=status_key
+            )
+            
+            # File upload with dynamic key
+            uploaded_files = st.file_uploader(
+                "Upload Images for SharePoint",
+                accept_multiple_files=True,
+                type=list(ALLOWED_EXTENSIONS),
+                key=file_uploader_key
+            )
+            
+            if uploaded_files:
+                if st.button("Upload to SharePoint", type="primary"):
+                    # Simple and fast SharePoint upload
+                    with st.spinner("Uploading images..."):
+                        try:
+                            # Get SharePoint access token
+                            access_token, error = get_sharepoint_access_token()
+                            if error:
+                                st.error("Upload failed. Please try again.")
+                                return
                             
-                            total_files = len(uploaded_files)
-                            successful_uploads = 0
-                            failed_uploads = 0
+                            # Get the Shopify_orders_photos drive ID
+                            drive_id, error = get_shopify_orders_drive_id(access_token)
+                            if error:
+                                st.error("Upload failed. Please try again.")
+                                return
                             
-                            for i, uploaded_file in enumerate(uploaded_files):
-                                file_name = uploaded_file.name
-                                status_text.text(f"Uploading {file_name}... ({i+1}/{total_files})")
+                            # Create folder path: CustomerName/Status/OrderID
+                            folder_path = f"{customer_name}/{selected_status}/{selected_order_id}"
+                            folder_id, error = get_or_create_folder_path(access_token, drive_id, folder_path)
+                            if error:
+                                st.error("Upload failed. Please try again.")
+                                return
+                            
+                            # Upload all files
+                            successful_count = 0
+                            failed_count = 0
+                            
+                            for uploaded_file in uploaded_files:
+                                file_content = uploaded_file.getvalue()
+                                success, error = upload_file_content_to_sharepoint(
+                                    access_token, 
+                                    drive_id, 
+                                    folder_id, 
+                                    uploaded_file.name, 
+                                    file_content
+                                )
                                 
-                                try:
-                                    # Get file content
-                                    file_content = uploaded_file.getbuffer()
-                                    
-                                    # Optimize image if it's an image file (not PDF)
-                                    file_extension = os.path.splitext(file_name)[1].lower()
-                                    if file_extension not in ['.pdf']:
-                                        try:
-                                            # Optimize the image to reduce size
-                                            file_content = optimize_image(file_content, max_size_kb=500)
-                                        except Exception as e:
-                                            # If optimization fails, use original content
-                                            st.warning(f"Could not optimize {file_name}: {str(e)}")
-                                    
-                                    # Upload to SharePoint
-                                    file_url, error = upload_file_content_to_sharepoint(
-                                        token, drive_id, folder_id, file_name, file_content
-                                    )
-                                    
-                                    if error:
-                                        st.error(f"Error uploading {file_name}: {error}")
-                                        failed_uploads += 1
-                                    else:
-                                        successful_uploads += 1
-                                        
-                                except Exception as e:
-                                    st.error(f"Exception uploading {file_name}: {str(e)}")
-                                    failed_uploads += 1
-                                
-                                # Update progress
-                                progress_bar.progress((i + 1) / total_files)
+                                if success:
+                                    successful_count += 1
+                                else:
+                                    failed_count += 1
                             
-                            # Show final status
-                            if successful_uploads == total_files:
-                                st.success(f"All {total_files} files uploaded successfully to {folder_path}!")
+                            # Show only one simple success message
+                            if successful_count > 0:
+                                st.success(f"✅ Successfully uploaded {successful_count} image(s)!")
                                 # Set flag to reset form on next rerun
                                 st.session_state.shopify_form_submitted = True
-                                # Force a rerun to reset the form after a delay
-                                time.sleep(2)  # Give user time to see the success message
+                                # Give user time to see the success message
+                                time.sleep(1)
+                                # Force a rerun to reset the form
                                 st.rerun()
                             else:
-                                st.warning(f"Uploaded {successful_uploads} files, {failed_uploads} failed.")
+                                st.error("❌ Upload failed. Please try again.")
+                            
+                        except Exception as e:
+                            st.error("❌ Upload failed. Please try again.")
+        else:
+            st.error(f"Customer not found for OrderID: {selected_order_id}")
 
 def main():
-    """Main function to run the Streamlit app"""
-    # Initialize database if needed
+    st.title("Project Image Upload System")
+    
+    # Add database status indicator in sidebar
+    st.sidebar.markdown("### Database Status")
+    db_status, error = test_database_connection()
+    
+    if db_status:
+        st.sidebar.success("✅ Database connection successful")
+    else:
+        st.sidebar.error("❌ Database connection failed")
+        st.sidebar.error(error)
+    
+    # Initialize application
     init_database()
     
-    # Create tabs for different functions
+    # Create tabs with only two tabs (removed Manage Projects tab)
     tab1, tab2 = st.tabs(["Procore Projects", "Shopify Orders"])
     
     with tab1:
