@@ -1078,6 +1078,27 @@ def manage_projects_tab():
 
 def shopify_upload_tab():
     """Simple Shopify image upload tab"""
+    # Initialize session state variables if they don't exist
+    if 'shopify_form_submitted' not in st.session_state:
+        st.session_state.shopify_form_submitted = False
+    
+    # Only generate new form keys when the form is submitted successfully
+    # or when the app first loads and keys don't exist
+    if 'shopify_form_key_prefix' not in st.session_state or st.session_state.shopify_form_submitted:
+        st.session_state.shopify_form_key_prefix = f"shopify_upload_{int(time.time())}"
+    
+    # Use the stored keys
+    order_id_key = f"{st.session_state.shopify_form_key_prefix}_order_id"
+    status_key = f"{st.session_state.shopify_form_key_prefix}_status"
+    file_uploader_key = f"{st.session_state.shopify_form_key_prefix}_files"
+    
+    # Check if we need to reset the form
+    if st.session_state.shopify_form_submitted:
+        # Reset the flag
+        st.session_state.shopify_form_submitted = False
+        # Force a rerun with clean state
+        st.rerun()
+    
     st.header("Shopify Orders - Image Upload")
     
     # Get OrderIDs from database
@@ -1087,12 +1108,13 @@ def shopify_upload_tab():
         st.warning("No Shopify OrderIDs found in database. Please add some OrderIDs to the ShopifyProjectData table first.")
         return
     
-    # OrderID selection
+    # OrderID selection with dynamic key
     selected_order_id = st.selectbox(
         "Select OrderID",
         options=[""] + order_ids,
         index=0,
-        placeholder="Choose an OrderID"
+        placeholder="Choose an OrderID",
+        key=order_id_key
     )
     
     if selected_order_id:
@@ -1102,24 +1124,25 @@ def shopify_upload_tab():
         if customer_name:
             st.info(f"Customer: **{customer_name}**")
             
-            # Status selection
+            # Status selection with dynamic key
             status_options = ["PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
             selected_status = st.selectbox(
                 "Select Status",
                 options=status_options,
-                index=0
+                index=0,
+                key=status_key
             )
             
-            # File upload
+            # File upload with dynamic key
             uploaded_files = st.file_uploader(
                 "Upload Images for SharePoint",
                 accept_multiple_files=True,
                 type=list(ALLOWED_EXTENSIONS),
-                help="Images will be uploaded to SharePoint in the folder structure: CustomerName/Status/OrderID/"
+                key=file_uploader_key
             )
             
             if uploaded_files:
-                st.success(f"Ready to upload {len(uploaded_files)} image(s) to SharePoint")
+                # Simple folder path display
                 st.info(f"Folder path: **{customer_name}/{selected_status}/{selected_order_id}/**")
                 
                 if st.button("Upload to SharePoint", type="primary"):
@@ -1164,14 +1187,15 @@ def shopify_upload_tab():
                                 else:
                                     failed_count += 1
                             
-                            # Show simple results
+                            # Show only one simple success message
                             if successful_count > 0:
-                                if successful_count == len(uploaded_files):
-                                    st.success(f"✅ Successfully uploaded {successful_count} image(s)!")
-                                else:
-                                    st.success(f"✅ Uploaded {successful_count} image(s)")
-                                    if failed_count > 0:
-                                        st.warning(f"⚠️ {failed_count} image(s) failed to upload")
+                                st.success(f"✅ Successfully uploaded {successful_count} image(s)!")
+                                # Set flag to reset form on next rerun
+                                st.session_state.shopify_form_submitted = True
+                                # Give user time to see the success message
+                                time.sleep(1)
+                                # Force a rerun to reset the form
+                                st.rerun()
                             else:
                                 st.error("❌ Upload failed. Please try again.")
                             
@@ -1179,15 +1203,6 @@ def shopify_upload_tab():
                             st.error("❌ Upload failed. Please try again.")
         else:
             st.error(f"Customer not found for OrderID: {selected_order_id}")
-    
-    # Instructions
-    st.markdown("---")
-    st.markdown("### Instructions")
-    st.markdown("1. Select an OrderID from the dropdown")
-    st.markdown("2. Choose the appropriate Status")
-    st.markdown("3. Upload images that will be stored in SharePoint")
-    st.markdown("4. Click 'Upload to SharePoint' to save images")
-    st.markdown("\n**Note:** Images will be organized in SharePoint as: `CustomerName/Status/OrderID/[images]`")
 
 def main():
     st.title("Project Image Upload System")
