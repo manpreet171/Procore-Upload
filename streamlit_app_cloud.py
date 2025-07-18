@@ -17,6 +17,7 @@ import subprocess
 from PIL import Image
 import pyodbc
 import urllib.parse
+import msal
 
 # Set page configuration
 st.set_page_config(
@@ -65,6 +66,13 @@ if os.name == 'nt':  # Windows
 else:  # Linux (including Streamlit Cloud)
     DB_DRIVER = "ODBC Driver 17 for SQL Server"
 
+# SharePoint Configuration
+SHAREPOINT_CLIENT_ID = ""
+SHAREPOINT_CLIENT_SECRET = ""
+SHAREPOINT_TENANT_ID = ""
+SHAREPOINT_AUTHORITY = ""
+SHAREPOINT_SCOPES = ["https://graph.microsoft.com/.default"]
+
 # Override with secrets if available
 try:
     if 'EMAIL_SENDER' in st.secrets:
@@ -84,12 +92,13 @@ try:
         DB_USERNAME = st.secrets.get("DB_USERNAME", DB_USERNAME)
         DB_PASSWORD = st.secrets.get("DB_PASSWORD", DB_PASSWORD)
         DB_DRIVER = st.secrets.get("DB_DRIVER", DB_DRIVER)
-    else:
-        # Use environment variables as fallback
-        DB_SERVER = os.getenv('AZURE_DB_SERVER', '')
-        DB_NAME = os.getenv('AZURE_DB_NAME', '')
-        DB_USERNAME = os.getenv('AZURE_DB_USERNAME', '')
-        DB_PASSWORD = os.getenv('AZURE_DB_PASSWORD', '')
+        
+    # Load SharePoint credentials from secrets if available
+    if 'SHAREPOINT_CLIENT_ID' in st.secrets:
+        SHAREPOINT_CLIENT_ID = st.secrets.get("SHAREPOINT_CLIENT_ID", SHAREPOINT_CLIENT_ID)
+        SHAREPOINT_CLIENT_SECRET = st.secrets.get("SHAREPOINT_CLIENT_SECRET", SHAREPOINT_CLIENT_SECRET)
+        SHAREPOINT_TENANT_ID = st.secrets.get("SHAREPOINT_TENANT_ID", SHAREPOINT_TENANT_ID)
+        SHAREPOINT_AUTHORITY = f"https://login.microsoftonline.com/{SHAREPOINT_TENANT_ID}"
         
         # Use appropriate driver format based on platform
         if os.name == 'nt':  # Windows
@@ -107,6 +116,156 @@ if not os.path.exists(UPLOAD_FOLDER):
 def verify_password(password):
     """Verify if the provided password matches the admin password"""
     return password == ADMIN_PASSWORD
+
+# SharePoint Helper Functions
+def get_sharepoint_access_token():
+    """Get access token for SharePoint using client credentials flow"""
+    try:
+        if not all([SHAREPOINT_CLIENT_ID, SHAREPOINT_CLIENT_SECRET, SHAREPOINT_TENANT_ID]):
+            return None, "SharePoint credentials not configured"
+            
+        app = msal.ConfidentialClientApplication(
+            SHAREPOINT_CLIENT_ID,
+            authority=SHAREPOINT_AUTHORITY,
+            client_credential=SHAREPOINT_CLIENT_SECRET,
+        )
+        
+        result = app.acquire_token_for_client(scopes=SHAREPOINT_SCOPES)
+        
+        if "access_token" in result:
+            return result["access_token"], None
+        else:
+            error_msg = result.get('error_description', 'Unknown authentication error')
+            return None, f"Authentication failed: {error_msg}"
+            
+    except Exception as e:
+        return None, f"Error getting access token: {str(e)}"
+
+def get_shopify_orders_drive_id(token):
+    """Get the drive ID for the Shopify_orders_photos library"""
+    try:
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        
+        response = requests.get('https://graph.microsoft.com/v1.0/sites/root/drives', headers=headers)
+        
+        if response.status_code == 200:
+            drives_data = response.json()
+            
+            for drive in drives_data.get('value', []):
+                if drive.get('name') == 'Shopify_orders_photos':
+                    return drive.get('id'), None
+                    
+            return None, "Shopify_orders_photos library not found"
+        else:
+            return None, f"Failed to get drives: {response.status_code} - {response.text}"
+            
+    except Exception as e:
+        return None, f"Error getting drive ID: {str(e)}"
+
+def create_sharepoint_folder(token, drive_id, parent_folder_id, folder_name):
+    """Create a folder in SharePoint"""
+    try:
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        
+        folder_data = {
+            "name": folder_name,
+            "folder": {},
+            "@microsoft.graph.conflictBehavior": "rename"
+        }
+        
+        if parent_folder_id == "root":
+            url = f'https://graph.microsoft.com/v1.0/drives/{drive_id}/root/children'
+        else:
+            url = f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{parent_folder_id}/children'
+        
+        response = requests.post(url, headers=headers, json=folder_data)
+        
+        if response.status_code == 201:
+            created_folder = response.json()
+            return created_folder.get('id'), None
+        else:
+            return None, f"Failed to create folder: {response.status_code} - {response.text}"
+            
+    except Exception as e:
+        return None, f"Error creating folder: {str(e)}"
+
+def get_or_create_folder_path(token, drive_id, folder_path):
+    """Get or create a folder path in SharePoint (e.g., 'CustomerName/Status/OrderID')"""
+    try:
+        folders = folder_path.strip('/').split('/')
+        current_folder_id = "root"
+        
+        for folder_name in folders:
+            if not folder_name:  # Skip empty folder names
+                continue
+                
+            # Try to find existing folder first
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json'
+            }
+            
+            if current_folder_id == "root":
+                url = f'https://graph.microsoft.com/v1.0/drives/{drive_id}/root/children'
+            else:
+                url = f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{current_folder_id}/children'
+            
+            response = requests.get(url, headers=headers)
+            
+            folder_found = False
+            if response.status_code == 200:
+                items = response.json().get('value', [])
+                for item in items:
+                    if item.get('name') == folder_name and 'folder' in item:
+                        current_folder_id = item.get('id')
+                        folder_found = True
+                        break
+            
+            # Create folder if not found
+            if not folder_found:
+                new_folder_id, error = create_sharepoint_folder(token, drive_id, current_folder_id, folder_name)
+                if error:
+                    return None, f"Error creating folder '{folder_name}': {error}"
+                current_folder_id = new_folder_id
+        
+        return current_folder_id, None
+        
+    except Exception as e:
+        return None, f"Error creating folder path: {str(e)}"
+
+def upload_file_to_sharepoint(token, drive_id, folder_id, file_path, file_name):
+    """Upload a file to SharePoint"""
+    try:
+        headers = {
+            'Authorization': f'Bearer {token}',
+        }
+        
+        # Read file content
+        with open(file_path, 'rb') as file:
+            file_content = file.read()
+        
+        # Upload file
+        if folder_id == "root":
+            url = f'https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{file_name}:/content'
+        else:
+            url = f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{folder_id}:/{file_name}:/content'
+        
+        response = requests.put(url, headers=headers, data=file_content)
+        
+        if response.status_code in [200, 201]:
+            uploaded_file = response.json()
+            return uploaded_file.get('webUrl'), None
+        else:
+            return None, f"Failed to upload file: {response.status_code} - {response.text}"
+            
+    except Exception as e:
+        return None, f"Error uploading file: {str(e)}"
 
 def send_email(recipient_email, subject, body, attachments=None):
     """Send email with optional attachments using Brevo SMTP"""
@@ -486,23 +645,6 @@ def bulk_import_projects(file):
     except Exception as e:
         return False, f"Error importing projects: {str(e)}"
 
-def get_projects_from_db():
-    """Get all projects from the database"""
-    try:
-        conn, error = get_db_connection()
-        if error:
-            st.error(error)
-            return pd.DataFrame(columns=['Project ID', 'Email ID link'])
-            
-        # Query the database for all projects
-        query = "SELECT ProjectNumber as 'Project ID', ProcorePhotoEmail as 'Email ID link' FROM dbo.ProcoreProjectData ORDER BY ProjectNumber"
-        df = pd.read_sql(query, conn)
-        conn.close()
-        return df
-    except Exception as e:
-        st.error(f"Error retrieving projects from database: {str(e)}")
-        return pd.DataFrame(columns=['Project ID', 'Email ID link'])
-
 def log_change(action, project_id, details):
     """Log a change to the change log table in the database"""
     try:
@@ -550,6 +692,68 @@ def get_change_history():
     # Database is now the source of truth for projects and change logs
     # No need to create CSV files anymore
 
+# Shopify Database Functions
+def get_shopify_order_ids():
+    """Get all OrderIDs from ShopifyProjectData table for dropdown"""
+    try:
+        conn, error = get_db_connection()
+        if error:
+            return []
+            
+        # Query the database for OrderIDs only
+        query = "SELECT DISTINCT OrderID FROM dbo.ShopifyProjectData WHERE OrderID IS NOT NULL ORDER BY OrderID"
+        cursor = conn.cursor()
+        cursor.execute(query)
+        
+        # Extract OrderIDs from the result
+        order_ids = [row[0] for row in cursor.fetchall()]
+        
+        cursor.close()
+        conn.close()
+        return order_ids
+    except Exception as e:
+        st.error(f"Error getting Shopify OrderIDs: {str(e)}")
+        return []
+
+def get_shopify_customer_by_order(order_id):
+    """Get CustomerName for a specific OrderID from ShopifyProjectData"""
+    try:
+        conn, error = get_db_connection()
+        if error:
+            return None
+            
+        cursor = conn.cursor()
+        query = "SELECT CustomerName FROM dbo.ShopifyProjectData WHERE OrderID = ?"
+        cursor.execute(query, str(order_id))
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if result:
+            return result[0]
+        return None
+    except Exception as e:
+        st.error(f"Error getting customer for OrderID {order_id}: {str(e)}")
+        return None
+
+def get_shopify_projects_from_db():
+    """Get all Shopify projects from the database"""
+    try:
+        conn, error = get_db_connection()
+        if error:
+            st.error(error)
+            return pd.DataFrame(columns=['OrderID', 'CustomerName', 'Status'])
+            
+        # Query the database for Shopify projects
+        query = "SELECT OrderID, CustomerName, Status FROM dbo.ShopifyProjectData ORDER BY OrderID"
+        df = pd.read_sql(query, conn)
+        conn.close()
+        return df
+    except Exception as e:
+        st.error(f"Error retrieving Shopify projects from database: {str(e)}")
+        return pd.DataFrame(columns=['OrderID', 'CustomerName', 'Status'])
+
 # Other configuration
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
@@ -575,142 +779,6 @@ def test_database_connection(max_retries=3, retry_delay=2):
                 time.sleep(retry_delay)
     
     return False, error
-
-def send_email(recipient_email, subject, body, file_paths):
-    """Send email with attachments using Brevo SMTP"""
-    
-    # Initialize email log in session state if it doesn't exist
-    if 'email_log' not in st.session_state:
-        st.session_state.email_log = []
-    
-    # Function to add log entries
-    def log_entry(level, message):
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        st.session_state.email_log.append({"time": timestamp, "level": level, "message": message})
-    
-    try:
-        # Clear previous logs if this is a new email attempt
-        if len(st.session_state.email_log) > 20:  # Keep logs manageable
-            st.session_state.email_log = []
-        
-        # Log email configuration
-        log_entry("info", f"Starting email to: {recipient_email}")
-        log_entry("info", f"SMTP Server: {BREVO_SMTP_SERVER}:{BREVO_SMTP_PORT}")
-        log_entry("info", f"From: {EMAIL_SENDER}")
-        
-        # Check if files exist and are readable
-        valid_files = []
-        for file_path in file_paths:
-            if os.path.exists(file_path) and os.access(file_path, os.R_OK):
-                valid_files.append(file_path)
-                log_entry("success", f"File valid: {os.path.basename(file_path)}")
-            else:
-                log_entry("error", f"File not accessible: {file_path}")
-                st.error(f" File not accessible: {file_path}")
-        
-        if not valid_files:
-            log_entry("error", "No valid files to attach!")
-            st.error("No valid files to attach!")
-            return False
-        
-        # Create message
-        msg = MIMEMultipart()
-        msg['From'] = f"{EMAIL_SENDER_NAME} <{EMAIL_SENDER}>"  # Fixed format
-        msg['To'] = recipient_email
-        msg['Subject'] = subject
-        
-        # Add HTML body
-        msg.attach(MIMEText(f"<html><body>{body}</body></html>", 'html'))
-        log_entry("success", "Email body attached")
-        
-        # Attach files
-        total_size = 0
-        for file_path in valid_files:
-            try:
-                with open(file_path, 'rb') as file:
-                    file_content = file.read()
-                    total_size += len(file_content)
-                    file_name = os.path.basename(file_path)
-                    
-                    # Get the correct file extension and MIME subtype
-                    file_extension = os.path.splitext(file_path)[1].lower().lstrip('.')
-                    
-                    # Map common image extensions to MIME subtypes
-                    mime_subtypes = {
-                        'jpg': 'jpeg',
-                        'jpeg': 'jpeg',
-                        'png': 'png',
-                        'gif': 'gif'
-                    }
-                    subtype = mime_subtypes.get(file_extension, 'octet-stream')
-                    
-                    attachment = MIMEApplication(file_content, _subtype=subtype)
-                    attachment.add_header('Content-Disposition', f'attachment; filename="{file_name}"')
-                    msg.attach(attachment)
-                    
-                    # Log attachment
-                    log_entry("success", f"Attached: {file_name} ({len(file_content)/1024:.1f} KB, type: {subtype})")
-            except Exception as e:
-                log_entry("error", f"Error attaching file {file_path}: {str(e)}")
-                st.error(f" Error attaching file {file_path}: {str(e)}")
-                return False
-        
-        # Check if email size is too large (Brevo limit is 10MB)
-        log_entry("info", f"Total email size: {total_size/1024/1024:.2f} MB")
-        if total_size > 10 * 1024 * 1024:
-            log_entry("error", f"Email size exceeds Brevo's 10MB limit! ({total_size/1024/1024:.2f} MB)")
-            st.error(" Email size exceeds Brevo's 10MB limit!")
-            return False
-        
-        # Connect to server and send email
-        try:
-            log_entry("info", "Connecting to SMTP server...")
-            server = smtplib.SMTP(BREVO_SMTP_SERVER, BREVO_SMTP_PORT)
-            log_entry("info", "Connected to SMTP server")
-            
-            log_entry("info", "Starting TLS...")
-            server.ehlo()
-            server.starttls()
-            log_entry("info", "TLS started")
-            
-            log_entry("info", "Logging in...")
-            server.login(BREVO_SMTP_LOGIN, BREVO_SMTP_PASSWORD)
-            log_entry("success", "Login successful")
-            
-            text = msg.as_string()
-            
-            # Send the email
-            log_entry("info", f"Sending email to {recipient_email}...")
-            send_result = server.sendmail(EMAIL_SENDER, [recipient_email], text)
-            
-            # Check if there were any failed recipients
-            if send_result:
-                log_entry("error", f"Failed to deliver to some recipients: {send_result}")
-                st.error(" Failed to deliver to some recipients")
-                server.quit()
-                return False
-            
-            log_entry("success", "Email sent successfully!")
-            server.quit()
-            return True
-            
-        except smtplib.SMTPAuthenticationError as auth_error:
-            log_entry("error", f"Authentication failed: {auth_error}")
-            st.error(" Authentication failed! Please check your SMTP login and password.")
-            return False
-        except smtplib.SMTPException as smtp_error:
-            log_entry("error", f"SMTP error: {smtp_error}")
-            st.error(f" SMTP error: {str(smtp_error)}")
-            return False
-        except Exception as e:
-            log_entry("error", f"Unexpected error during email sending: {e}")
-            st.error(f" Error sending email: {str(e)}")
-            return False
-            
-    except Exception as e:
-        log_entry("error", f"General error in send_email function: {e}")
-        st.error(f" Error sending email: {str(e)}")
-        return False
 
 def verify_password(password):
     """Verify if the provided password matches the admin password"""
@@ -984,6 +1052,67 @@ def manage_projects_tab():
 
 # Note: view_projects_tab and view_logs_tab functions have been integrated into the manage_projects_tab function
 
+def shopify_upload_tab():
+    """Simple Shopify image upload tab"""
+    st.header("Shopify Orders - Image Upload")
+    
+    # Get OrderIDs from database
+    order_ids = get_shopify_order_ids()
+    
+    if not order_ids:
+        st.warning("No Shopify OrderIDs found in database. Please add some OrderIDs to the ShopifyProjectData table first.")
+        return
+    
+    # OrderID selection
+    selected_order_id = st.selectbox(
+        "Select OrderID",
+        options=[""] + order_ids,
+        index=0,
+        placeholder="Choose an OrderID"
+    )
+    
+    if selected_order_id:
+        # Get customer name for selected order
+        customer_name = get_shopify_customer_by_order(selected_order_id)
+        
+        if customer_name:
+            st.info(f"Customer: **{customer_name}**")
+            
+            # Status selection
+            status_options = ["PRODUCTION", "SHIPPED", "PICKUP", "INSTALLATION"]
+            selected_status = st.selectbox(
+                "Select Status",
+                options=status_options,
+                index=0
+            )
+            
+            # File upload
+            uploaded_files = st.file_uploader(
+                "Upload Images for SharePoint",
+                accept_multiple_files=True,
+                type=list(ALLOWED_EXTENSIONS),
+                help="Images will be uploaded to SharePoint in the folder structure: CustomerName/Status/OrderID/"
+            )
+            
+            if uploaded_files:
+                st.success(f"Ready to upload {len(uploaded_files)} image(s) to SharePoint")
+                st.info(f"Folder path: **{customer_name}/{selected_status}/{selected_order_id}/**")
+                
+                if st.button("Upload to SharePoint", type="primary"):
+                    # This will be implemented in Chunk 4
+                    st.info("SharePoint upload functionality will be implemented in the next step.")
+        else:
+            st.error(f"Customer not found for OrderID: {selected_order_id}")
+    
+    # Instructions
+    st.markdown("---")
+    st.markdown("### Instructions")
+    st.markdown("1. Select an OrderID from the dropdown")
+    st.markdown("2. Choose the appropriate Status")
+    st.markdown("3. Upload images that will be stored in SharePoint")
+    st.markdown("4. Click 'Upload to SharePoint' to save images")
+    st.markdown("\n**Note:** Images will be organized in SharePoint as: `CustomerName/Status/OrderID/[images]`")
+
 def main():
     st.title("Project Image Upload System")
     
@@ -1001,13 +1130,16 @@ def main():
     init_database()
     
     # Create tabs
-    tab1, tab2 = st.tabs(["Upload Images", "Manage Projects"])
+    tab1, tab2, tab3 = st.tabs(["Upload Images", "Manage Projects", "Shopify Orders"])
     
     with tab1:
         upload_images_tab()
     
     with tab2:
         manage_projects_tab()
+    
+    with tab3:
+        shopify_upload_tab()
 
 if __name__ == "__main__":
     main()
