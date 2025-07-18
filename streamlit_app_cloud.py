@@ -17,8 +17,6 @@ import subprocess
 from PIL import Image
 import pyodbc
 import urllib.parse
-from office365.sharepoint.client_context import ClientContext
-from office365.runtime.auth.client_credential import ClientCredential
 
 # Set page configuration
 st.set_page_config(
@@ -67,13 +65,6 @@ if os.name == 'nt':  # Windows
 else:  # Linux (including Streamlit Cloud)
     DB_DRIVER = "ODBC Driver 17 for SQL Server"
 
-# SharePoint Configuration
-SHAREPOINT_SITE_URL = "https://sdgny.sharepoint.com/sites/sharedadmin"
-SHAREPOINT_CLIENT_ID = "314dc832-252d-40d3-9496-92dfe72e0fa7"
-SHAREPOINT_CLIENT_SECRET = ""
-SHAREPOINT_TENANT_ID = ""
-SHAREPOINT_FOLDER_PATH = "Shared Documents/Shopify Photos"
-
 # Override with secrets if available
 try:
     if 'EMAIL_SENDER' in st.secrets:
@@ -93,14 +84,6 @@ try:
         DB_USERNAME = st.secrets.get("DB_USERNAME", DB_USERNAME)
         DB_PASSWORD = st.secrets.get("DB_PASSWORD", DB_PASSWORD)
         DB_DRIVER = st.secrets.get("DB_DRIVER", DB_DRIVER)
-        
-    # Load SharePoint credentials from secrets if available
-    if 'SHAREPOINT_CLIENT_SECRET' in st.secrets:
-        SHAREPOINT_CLIENT_SECRET = st.secrets.get("SHAREPOINT_CLIENT_SECRET", SHAREPOINT_CLIENT_SECRET)
-        SHAREPOINT_TENANT_ID = st.secrets.get("SHAREPOINT_TENANT_ID", SHAREPOINT_TENANT_ID)
-        SHAREPOINT_SITE_URL = st.secrets.get("SHAREPOINT_SITE_URL", SHAREPOINT_SITE_URL)
-        SHAREPOINT_CLIENT_ID = st.secrets.get("SHAREPOINT_CLIENT_ID", SHAREPOINT_CLIENT_ID)
-        SHAREPOINT_FOLDER_PATH = st.secrets.get("SHAREPOINT_FOLDER_PATH", SHAREPOINT_FOLDER_PATH)
     else:
         # Use environment variables as fallback
         DB_SERVER = os.getenv('AZURE_DB_SERVER', '')
@@ -317,49 +300,6 @@ def get_email_for_project(project_id):
     except Exception as e:
         st.error(f"Error getting email for project: {e}")
         st.sidebar.error(f"Exception: {str(e)}")
-        return None
-
-# Shopify Database Functions
-def get_all_shopify_order_ids():
-    """Get all Shopify order IDs from the database for autocomplete"""
-    try:
-        conn, error = get_db_connection()
-        if error:
-            return []
-            
-        # Query the database for order IDs only
-        query = "SELECT OrderID FROM dbo.ShopifyProjectData ORDER BY OrderID"
-        cursor = conn.cursor()
-        cursor.execute(query)
-        
-        # Extract order IDs from the result
-        order_ids = [row[0] for row in cursor.fetchall()]
-        
-        cursor.close()
-        conn.close()
-        return order_ids
-    except Exception as e:
-        return []
-
-def get_customer_name_for_order(order_id):
-    """Get customer name for a specific order ID"""
-    try:
-        conn, error = get_db_connection()
-        if error:
-            return None
-            
-        cursor = conn.cursor()
-        query = "SELECT CustomerName FROM dbo.ShopifyProjectData WHERE OrderID = ?"
-        cursor.execute(query, str(order_id))
-        result = cursor.fetchone()
-        
-        if not result:
-            return None
-            
-        customer_name = result[0]
-        conn.close()
-        return customer_name
-    except Exception as e:
         return None
 
 def add_project_to_db(project_id, email):
@@ -635,75 +575,6 @@ def test_database_connection(max_retries=3, retry_delay=2):
                 time.sleep(retry_delay)
     
     return False, error
-
-# SharePoint Functions
-def get_sharepoint_context():
-    """Get authenticated SharePoint context"""
-    try:
-        if not SHAREPOINT_CLIENT_SECRET or not SHAREPOINT_TENANT_ID:
-            return None, "SharePoint credentials not configured"
-            
-        # Create client credentials
-        client_credentials = ClientCredential(
-            client_id=SHAREPOINT_CLIENT_ID,
-            client_secret=SHAREPOINT_CLIENT_SECRET
-        )
-        
-        # Create SharePoint context
-        ctx = ClientContext(SHAREPOINT_SITE_URL).with_credentials(client_credentials)
-        
-        # Test the connection
-        web = ctx.web
-        ctx.load(web)
-        ctx.execute_query()
-        
-        return ctx, None
-    except Exception as e:
-        return None, f"SharePoint authentication failed: {str(e)}"
-
-def create_sharepoint_folder(ctx, folder_path):
-    """Create a folder in SharePoint if it doesn't exist"""
-    try:
-        # Get the document library
-        web = ctx.web
-        ctx.load(web)
-        ctx.execute_query()
-        
-        # Navigate to the folder path and create if needed
-        folder_names = folder_path.split('/')
-        current_folder = web.default_document_library().root_folder
-        
-        for folder_name in folder_names:
-            if folder_name.strip():  # Skip empty strings
-                try:
-                    # Try to get the folder
-                    current_folder = current_folder.folders.get_by_name(folder_name)
-                    ctx.load(current_folder)
-                    ctx.execute_query()
-                except:
-                    # Folder doesn't exist, create it
-                    current_folder = current_folder.folders.add(folder_name)
-                    ctx.execute_query()
-        
-        return current_folder, None
-    except Exception as e:
-        return None, f"Error creating folder: {str(e)}"
-
-def upload_file_to_sharepoint(ctx, folder_path, file_name, file_content):
-    """Upload a file to SharePoint"""
-    try:
-        # Create the folder if it doesn't exist
-        folder, error = create_sharepoint_folder(ctx, folder_path)
-        if error:
-            return False, error
-            
-        # Upload the file
-        file_info = folder.files.upload(file_name, file_content)
-        ctx.execute_query()
-        
-        return True, None
-    except Exception as e:
-        return False, f"Error uploading file: {str(e)}"
 
 def send_email(recipient_email, subject, body, file_paths):
     """Send email with attachments using Brevo SMTP"""
@@ -1111,143 +982,6 @@ def manage_projects_tab():
                 mime="text/csv"
             )
 
-def upload_shopify_orders_tab():
-    """Tab for uploading images for Shopify orders to SharePoint"""
-    # Initialize session state variables if they don't exist
-    if 'shopify_form_submitted' not in st.session_state:
-        st.session_state.shopify_form_submitted = False
-    
-    # Only generate new form keys when the form is submitted successfully
-    if 'shopify_form_key_prefix' not in st.session_state or st.session_state.shopify_form_submitted:
-        st.session_state.shopify_form_key_prefix = f"shopify_form_{int(time.time())}"
-    
-    # Use the stored keys
-    order_id_key = f"{st.session_state.shopify_form_key_prefix}_order_id"
-    status_key = f"{st.session_state.shopify_form_key_prefix}_status"
-    file_uploader_key = f"{st.session_state.shopify_form_key_prefix}_files"
-    
-    # Check if we need to reset the form
-    if st.session_state.shopify_form_submitted:
-        # Reset the flag
-        st.session_state.shopify_form_submitted = False
-        # Force a rerun with clean state
-        st.rerun()
-    
-    st.header("Upload Images for Shopify Orders")
-    
-    # Get all order IDs for autocomplete
-    all_order_ids = get_all_shopify_order_ids()
-    
-    # Order ID input with autocomplete
-    if all_order_ids:
-        # Add an empty option at the beginning
-        order_id_options = [""]
-        order_id_options.extend(all_order_ids)
-        
-        order_id = st.selectbox(
-            "Select Order ID:",
-            options=order_id_options,
-            key=order_id_key,
-            help="Select an order ID from the dropdown"
-        )
-    else:
-        st.error("No Shopify orders found in the database")
-        return
-    
-    # Status selection with blank default
-    status_options = ["", "Production", "Shipped", "Delivered", "Cancelled"]
-    status = st.selectbox(
-        "Select Status:",
-        options=status_options,
-        key=status_key,
-        help="Select the status for this order"
-    )
-    
-    # File uploader
-    uploaded_files = st.file_uploader(
-        "Choose image files",
-        type=['png', 'jpg', 'jpeg', 'gif'],
-        accept_multiple_files=True,
-        key=file_uploader_key
-    )
-    
-    # Only show upload button if all required fields are filled
-    if order_id and order_id != "" and status and status != "" and uploaded_files:
-        if st.button("Upload Images to SharePoint", type="primary"):
-            # Get customer name for the order
-            customer_name = get_customer_name_for_order(order_id)
-            
-            if not customer_name:
-                st.error(f"Customer name not found for Order ID: {order_id}")
-                return
-            
-            # Create SharePoint folder path: CustomerName/Status/OrderID
-            folder_path = f"{SHAREPOINT_FOLDER_PATH}/{customer_name}/{status}/{order_id}"
-            
-            # Get SharePoint context
-            ctx, error = get_sharepoint_context()
-            if error:
-                st.error(f"SharePoint authentication failed: {error}")
-                st.info("Please ensure SharePoint credentials are configured in Streamlit secrets")
-                return
-            
-            # Upload files
-            success_count = 0
-            error_count = 0
-            
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            for i, uploaded_file in enumerate(uploaded_files):
-                status_text.text(f"Uploading {uploaded_file.name}...")
-                
-                # Read file content
-                file_content = uploaded_file.read()
-                
-                # Upload to SharePoint
-                success, upload_error = upload_file_to_sharepoint(
-                    ctx, folder_path, uploaded_file.name, file_content
-                )
-                
-                if success:
-                    success_count += 1
-                else:
-                    error_count += 1
-                    st.error(f"Failed to upload {uploaded_file.name}: {upload_error}")
-                
-                # Update progress
-                progress_bar.progress((i + 1) / len(uploaded_files))
-            
-            # Show final results
-            status_text.empty()
-            progress_bar.empty()
-            
-            if success_count > 0:
-                st.success(f"Successfully uploaded {success_count} file(s) to SharePoint!")
-                st.info(f"Files uploaded to: {folder_path}")
-                
-                # Set flag to reset form on next rerun
-                st.session_state.shopify_form_submitted = True
-                
-                # Force a rerun to reset the form immediately
-                time.sleep(1)
-                st.rerun()
-            
-            if error_count > 0:
-                st.error(f"Failed to upload {error_count} file(s)")
-    else:
-        # Show what's missing
-        missing_items = []
-        if not order_id or order_id == "":
-            missing_items.append("Order ID")
-        if not status or status == "":
-            missing_items.append("Status")
-        if not uploaded_files:
-            missing_items.append("Image files")
-        
-        if missing_items:
-            st.info(f"Please provide: {', '.join(missing_items)}")
-
 # Note: view_projects_tab and view_logs_tab functions have been integrated into the manage_projects_tab function
 
 def main():
@@ -1267,15 +1001,12 @@ def main():
     init_database()
     
     # Create tabs
-    tab1, tab2, tab3 = st.tabs(["Procore Projects", "Shopify Orders", "Manage Projects"])
+    tab1, tab2 = st.tabs(["Upload Images", "Manage Projects"])
     
     with tab1:
         upload_images_tab()
     
     with tab2:
-        upload_shopify_orders_tab()
-    
-    with tab3:
         manage_projects_tab()
 
 if __name__ == "__main__":
