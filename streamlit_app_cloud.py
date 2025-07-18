@@ -523,6 +523,28 @@ def get_shopify_projects_from_db():
         st.error(f"Error retrieving Shopify projects from database: {str(e)}")
         return pd.DataFrame(columns=['OrderID', 'CustomerName', 'Status'])
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_email_for_project(project_id):
+    """Get email for a specific project ID"""
+    try:
+        conn, error = get_db_connection()
+        if error:
+            return None
+            
+        cursor = conn.cursor()
+        cursor.execute("SELECT ProcorePhotoEmail FROM ProcoreProjectData WHERE ProjectNumber = ?", (project_id,))
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if result:
+            return result[0]
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Error getting email: {str(e)}")
+        return None
+
 # ... (rest of the code remains the same)
 
 # Create uploads directory if it doesn't exist
