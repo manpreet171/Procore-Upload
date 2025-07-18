@@ -1142,9 +1142,6 @@ def shopify_upload_tab():
             )
             
             if uploaded_files:
-                # Simple folder path display
-                st.info(f"Folder path: **{customer_name}/{selected_status}/{selected_order_id}/**")
-                
                 if st.button("Upload to SharePoint", type="primary"):
                     # Simple and fast SharePoint upload
                     with st.spinner("Uploading images..."):
@@ -1220,14 +1217,17 @@ def main():
     # Initialize application
     init_database()
     
-    # Create tabs
-    tab1, tab2, tab3 = st.tabs(["Upload Images", "Manage Projects", "Shopify Orders"])
+    # Create tabs with renamed first tab
+    tab1, tab2, tab3 = st.tabs(["Procore Projects", "Manage Projects", "Shopify Orders"])
     
     with tab1:
         upload_images_tab()
     
     with tab2:
-        manage_projects_tab()
+        # Display a message that this tab is currently disabled
+        st.info("This feature is currently disabled. Please check back later.")
+        # Uncomment the line below to re-enable in the future
+        # manage_projects_tab()
     
     with tab3:
         shopify_upload_tab()
