@@ -9,9 +9,9 @@ st.set_page_config(page_title="SharePoint Connection Test", layout="wide")
 st.title("SharePoint Connection Test")
 
 # Hardcoded credentials for testing
-CLIENT_ID = "71a179a07-1c6f-4e10-a5ee-22dc8b8a0305"
-CLIENT_SECRET = "mx18Q~d_gmItyuP4IbV_ksNrByKtZNx6txIqObLA"
-TENANT_ID = "49302541-652f-4f88-a011-e33be6116bd3"
+CLIENT_ID = "your-client-id-here"
+CLIENT_SECRET = "your-client-secret-here"
+TENANT_ID = "your-tenant-id-here"
 
 # Microsoft Graph API endpoints
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
