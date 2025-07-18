@@ -240,7 +240,7 @@ def get_or_create_folder_path(token, drive_id, folder_path):
         return None, f"Error creating folder path: {str(e)}"
 
 def upload_file_to_sharepoint(token, drive_id, folder_id, file_path, file_name):
-    """Upload a file to SharePoint"""
+    """Upload a file to SharePoint from file path"""
     try:
         headers = {
             'Authorization': f'Bearer {token}',
@@ -249,6 +249,30 @@ def upload_file_to_sharepoint(token, drive_id, folder_id, file_path, file_name):
         # Read file content
         with open(file_path, 'rb') as file:
             file_content = file.read()
+        
+        # Upload file
+        if folder_id == "root":
+            url = f'https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{file_name}:/content'
+        else:
+            url = f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{folder_id}:/{file_name}:/content'
+        
+        response = requests.put(url, headers=headers, data=file_content)
+        
+        if response.status_code in [200, 201]:
+            uploaded_file = response.json()
+            return uploaded_file.get('webUrl'), None
+        else:
+            return None, f"Failed to upload file: {response.status_code} - {response.text}"
+            
+    except Exception as e:
+        return None, f"Error uploading file: {str(e)}"
+
+def upload_file_content_to_sharepoint(token, drive_id, folder_id, file_name, file_content):
+    """Upload file content directly to SharePoint"""
+    try:
+        headers = {
+            'Authorization': f'Bearer {token}',
+        }
         
         # Upload file
         if folder_id == "root":
@@ -1132,7 +1156,7 @@ def shopify_upload_tab():
                                 
                                 # Upload file to SharePoint
                                 file_content = uploaded_file.getvalue()
-                                success, error = upload_file_to_sharepoint(
+                                success, error = upload_file_content_to_sharepoint(
                                     access_token, 
                                     drive_id, 
                                     folder_id, 
