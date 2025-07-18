@@ -1217,19 +1217,13 @@ def main():
     # Initialize application
     init_database()
     
-    # Create tabs with renamed first tab
-    tab1, tab2, tab3 = st.tabs(["Procore Projects", "Manage Projects", "Shopify Orders"])
+    # Create tabs with only two tabs (removed Manage Projects tab)
+    tab1, tab2 = st.tabs(["Procore Projects", "Shopify Orders"])
     
     with tab1:
         upload_images_tab()
     
     with tab2:
-        # Display a message that this tab is currently disabled
-        st.info("This feature is currently disabled. Please check back later.")
-        # Uncomment the line below to re-enable in the future
-        # manage_projects_tab()
-    
-    with tab3:
         shopify_upload_tab()
 
 if __name__ == "__main__":
