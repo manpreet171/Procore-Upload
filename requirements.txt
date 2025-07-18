@@ -6,4 +6,4 @@ gitpython
 pyodbc==5.2.0    # For Azure SQL Database connectivity
 azure-identity    # For Azure authentication
 msal==1.24.0      # Microsoft Authentication Library for SharePoint
-Pillow==10.0.1    # For image processing (already used in main app)
+Pillow>=10.4.0    # For image processing (compatible with Python 3.13)
