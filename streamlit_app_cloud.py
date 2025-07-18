@@ -6,6 +6,14 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+
+# Configure page to collapse sidebar by default
+st.set_page_config(
+    page_title="Project Image Upload System",
+    page_icon="📷",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 import time
 import io
 import datetime
