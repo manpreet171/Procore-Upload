@@ -11,7 +11,7 @@ from email.mime.application import MIMEApplication
 st.set_page_config(
     page_title="Project Image Upload System",
     page_icon="📷",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="collapsed"
 )
 import time
